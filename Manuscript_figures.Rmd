@@ -1,0 +1,2871 @@
+---
+title: "Figures_MSA-PD"
+author: "Rasmus Rydbirk"
+date: "03-12-2024"
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+---
+
+# Setup
+
+```{r setup, message = F}
+library(conos)
+library(magrittr)
+library(dplyr)
+library(cacoa) # github.com/kharchenkolab/cacoa
+library(sccore)
+library(scHelper) # github.com/rrydbirk/scHelper
+library(qs)
+library(ggplot2)
+library(ggsci)
+library(cowplot)
+library(ggpubr)
+library(STRINGdb)
+library(reshape2)
+library(ggforce)
+library(ggpmisc)
+library(RColorBrewer)
+library(CRMetrics)
+library(ggrepel)
+library(circlize)
+library(ComplexHeatmap)
+library(stringr)
+library(rstatix)
+library(slingshot)
+
+## Comparisons
+comp <- list(c("CTRL","MSA"),
+             c("CTRL","PD"),
+             c("MSA","PD"))
+
+comp.long <- list(c("CTRL vs. MSA","CTRL vs. PD"),
+                  c("CTRL vs. MSA","PD vs. MSA"),
+                  c("CTRL vs. PD","PD vs. MSA"))
+
+# Palettes
+
+## Major celltypes
+anno.neurons <- qread("anno_neurons.qs")
+anno.neurons.major <- anno.neurons %>% 
+  collapseAnnotation("GABA") %>% 
+  collapseAnnotation("GLU") %>% 
+  renameAnnotation("GABA", "Inh. neurons") %>% 
+  renameAnnotation("GLU", "Exc. neurons") %>% 
+  collapseAnnotation("MSN")
+
+anno <- qread("anno_major.qs")
+
+anno.major <- anno[!names(anno) %in% names(anno.neurons.major) & !anno == "Neurons"] %>% 
+  {factor(c(., anno.neurons.major))}
+
+# qsave(anno.major, "/work/msa/03_annotations/anno_0final.qs")
+
+pal.major <- brewer.pal(n = 10, "Set1") %>% 
+  c("lightblue3") %>% 
+  setNames(levels(anno.major)[c(9,8,3,5,10,6:7,2,1,4)])
+
+## Condition
+pal.major %<>% c(c("yellow", brewer.pal(n = 6, "Accent")[5:6]) %>% setNames(c("CTRL","PD","MSA")))
+
+## Comparisons
+pal.major %<>% c(brewer.pal(n = 10, "Paired")[c(6,8,10)] %>% setNames(c("CTRL vs. MSA","CTRL vs. PD","PD vs. MSA")))
+
+## Neurons
+pal.major %<>% c(setNames(c("navy",
+                            "mediumblue",
+                            "lightslateblue",
+                            "lightskyblue",
+                            "lightblue",
+                            "lightseagreen",
+                            "blue",
+                            "cadetblue1",
+                            "cyan",
+                            "cyan4",
+                            "aquamarine2",
+                            "lightcoral",
+                            "brown1",
+                            "orange",
+                            "darkorange4",
+                            "lightgoldenrod3"), 
+                          levels(anno.neurons)))
+
+## Glia
+anno.glia <- c("anno_astro.qs",
+               "anno_oligo.qs",
+               "anno_opc.qs") %>% 
+  lapply(qread) %>% 
+  Reduce(c, .) %>% 
+  factor() %>% 
+  renameAnnotation("Homeostatic_astrocytes", "AS_homeostatic") %>% 
+  renameAnnotation("Reactive_astrocytes", "AS_reactive") %>% 
+  renameAnnotation("Homeostatic_LINC01608", "OL_LINC01608") %>%
+  renameAnnotation("Homeostatic_SLC5A11", "OL_SLC5A11") %>% 
+  renameAnnotation("Reactive_SCGZ", "OL_SGCZ")
+
+pal.major %<>% c(setNames(c("pink",
+                            pal.major["Astrocytes"],
+                            pal.major["Oligodendrocytes"],
+                            "chartreuse",
+                            "darkolivegreen",
+                            "brown4",
+                            "coral"),
+                          levels(anno.glia)))
+
+## Microglia
+anno.micro <- qread("anno_micro_pvm.qs") %>% 
+  renameAnnotation("Steady-state","MIC_steady-state") %>% 
+  renameAnnotation("Intermediate1","MIC_intermediate1") %>% 
+  renameAnnotation("Intermediate2","MIC_intermediate2") %>% 
+  renameAnnotation("Activated","MIC_activated")
+
+pal.major %<>% c(setNames(c(pal.major["Microglia"],
+                            "maroon4",
+                            "magenta",
+                            "pink3",
+                            pal.major["PVMs"]),
+                          levels(anno.micro)))
+
+## Phago. assay
+pal.major %<>% c(setNames(c("purple", 
+                            "black",
+                            pal.major[c("CTRL","PD","MSA")]), 
+                          c("PBS",
+                            "LPS",
+                            "CTRL CSF",
+                            "PD CSF",
+                            "MSA CSF")))
+
+## Houston assay
+pal.major %<>% c(setNames(c(pal.major["PBS"],
+                            pal.major["CTRL"],
+                            "yellow3",
+                            "orange",
+                            pal.major["PD"],
+                            "cyan4",
+                            "navyblue",
+                            pal.major["MSA"],
+                            "pink3",
+                            "red4"), 
+                          c("Microglia medium",
+                            "CTRL CSF, no dil.",
+                            "CTRL CSF, 1:2 dil.",
+                            "CTRL CSF, 1:4 dil.",
+                            "PD CSF, no dil.",
+                            "PD CSF, 1:2 dil.",
+                            "PD CSF, 1:4 dil.",
+                            "MSA CSF, no dil.",
+                            "MSA CSF, 1:2 dil.",
+                            "MSA CSF, 1:4 dil.")))
+
+# Load major Conos object
+con <- qread("con_major.qs", nthreads = 10)
+
+tt <- Sys.time()
+```
+
+Define helper functions
+
+```{r}
+getOntWithFamily <- function(cao, comp) {
+  fams <- cao$test.results[["GSEA"]]$families
+  
+  df.all <- list(cao$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "up", p.adj = 1, q.value = 1),
+                 cao$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "down", p.adj = 1, q.value = 1)) %>% 
+    bind_rows() %>% 
+    mutate(logp = -log10(p.adjust),
+           comp = comp)
+  
+  df <- cacoa:::getOntologyFamilyChildren(df.all, fams=fams, type = "GSEA", subtype = "BP")
+  
+  return(list(df.all = df.all,
+              df = df,
+              fams = fams))
+}
+```
+
+```{r}
+lianaCircos <- function(df,
+                        top.interactions = 30, 
+                        text.size = 1, 
+                        pal = pal.major, 
+                        cell.types = c("Astrocytes", 
+                                       "Immune", 
+                                       "Microglia",
+                                       "Neurons",
+                                       "OPCs",
+                                       "Oligodendrocytes",
+                                       "PVMs",
+                                       "Pericytes/endothelial"),
+                        big.gap = 5,
+                        small.gap = 2,
+                        arrow.width = 3,
+                        link.ramp.rel = T,
+                        link.sort = F,
+                        scale = F,
+                        arrow.head.width = 0.3,
+                        arrow.head.length = 0.3,
+                        link.ramp.col = c("navy", "grey", "firebrick")) {
+  input_df <- df %>% 
+    slice_max(order_by = score, n = top.interactions) %>% 
+    mutate(target = paste0(target, " ")) %>% 
+    mutate(source_lig = paste0(source, "|", ligand), 
+           target_rec = paste0(target, "|", receptor))
+  
+  if (link.ramp.rel) {
+    arr_wd <- rep(arrow.width, nrow(input_df))
+  } else {
+    arr_wd <- (((input_df$score - min(input_df$score))/(max(input_df$score) - min(input_df$score))) * (arrow.width)) + 1
+  }
+  
+  # Colors and segments
+  anno.col <- setNames(pal, 
+                       cell.types) %>% 
+    c(., "Oligodendrocytes " = unname(.["Oligodendrocytes"]))
+  
+  cell_cols <- anno.col[unique(c(unique(input_df$source), unique(input_df$target), "Oligodendrocytes "))]
+  
+  link_cols <- c()
+  
+  if (!link.ramp.rel) {
+    for (i in input_df$source_lig) {
+      link_cols <- c(link_cols, cell_cols[str_extract(i, 
+                                                      "[^|]+")])
+    }
+  } else {
+    input_df %<>% 
+      arrange(score)
+    
+    df.down <- input_df %>% filter(score <= 0)
+    link_down <- colorRampPalette(c(link.ramp.col[1], link.ramp.col[2]))(nrow(df.down))
+    
+    df.up <- input_df %>% filter(score > 0)
+    link_up <- colorRampPalette(c(link.ramp.col[2], link.ramp.col[3]))(nrow(df.up))
+    
+    link_cols <- c(link_down, link_up)
+  }
+  
+  segments <- unique(c(paste0(input_df$source, "|", input_df$ligand), 
+                       paste0(input_df$target, "|", input_df$receptor)))
+  
+  grp <- str_extract(segments, "[^|]+") %>% 
+    setNames(segments)
+  
+  # Redo colors
+  cell_cols2 <- grp
+  for (i in unique(grp)) {
+    cell_cols2[cell_cols2 == i] <- cell_cols[i]
+  }
+  
+  # Plot
+  input_df %>% 
+    select(source_lig, target_rec, score) %>%
+    chordDiagram(directional = 1, 
+                 group = grp,
+                 scale = scale, 
+                 diffHeight = 0.005, 
+                 direction.type = c("arrows"),
+                 link.arr.type = "triangle", 
+                 annotationTrack = c(), 
+                 preAllocateTracks = list(
+                   list(track.height = 0.05),
+                   list(track.height = 0.25),
+                   list(track.height = 0.05)), 
+                 big.gap = big.gap,
+                 transparency = 1,
+                 link.arr.lwd = arr_wd,
+                 link.arr.col = link_cols,
+                 link.arr.length = arrow.head.length,
+                 link.arr.width = arrow.head.width,
+                 small.gap = small.gap
+    )
+  
+  circos.track(track.index = 2, panel.fun = function(x, y) {
+    circos.text(CELL_META$xcenter, 
+                CELL_META$ylim[1], 
+                str_extract(CELL_META$sector.index, "[^|]+$"), 
+                facing = "clockwise", 
+                niceFacing = TRUE, 
+                adj = c(0, 0.55), 
+                cex = 1)
+  }, bg.border = NA)
+  
+  # Split segments
+  for (l in segments) {
+    highlight.sector(l, track.index = 3, col = cell_cols2[l])
+  }
+  
+  # Add ligand/receptor track
+  ## Ligand
+  highlight.sector(input_df$source_lig, 
+                   track.index = 1, 
+                   col = "black", 
+                   text = "Ligands", 
+                   cex = 1, 
+                   text.col = "white", 
+                   niceFacing = TRUE)
+  ## Receptor
+  highlight.sector(input_df$target_rec, 
+                   track.index = 1, 
+                   col = "white", 
+                   text = "Receptors", 
+                   cex = 1, 
+                   text.col = "black", 
+                   border = "black", 
+                   niceFacing = TRUE)
+  
+  # Legends
+  minmax <- input_df %>% 
+    pull(score) %>% 
+    {pmax(abs(min(.)), max(.))} %>% 
+    formatC(digits = 1) %>% 
+    as.numeric()
+  
+  col.range = c(-minmax, 0, minmax)
+  lgd_links = Legend(at = col.range, 
+                     col_fun = colorRamp2(col.range, link.ramp.col), 
+                     title_position = "topleft", 
+                     title = "Links")
+  
+  lgd_ct <- Legend(labels = unique(c(input_df$source, input_df$target)), 
+                   title = "Cell type", 
+                   type = "points",
+                   legend_gp = gpar(col = "transparent"), 
+                   background = cell_cols[unique(c(input_df$source, input_df$target))])
+  
+  lgd_list_vertical = packLegend(lgd_ct, lgd_links)
+  
+  draw(lgd_list_vertical, 
+       just = c("left", "bottom"), 
+       x = unit(5, "mm"), 
+       y = unit(5, "mm"))
+  
+  circos.clear()
+}
+```
+
+```{r}
+getTscanTrajectory <- function(con, anno) {
+  requireNamespace("TSCAN", quietly = T)
+  
+  emb <- con$embedding[names(anno), ]
+  anno %<>% .[rownames(emb)]
+  
+  cent.ids <- emb %>% 
+    rownames() %>% 
+    split(anno)
+  
+  centroids <- cent.ids %>% 
+    lapply(\(cid) emb[cid, ]) %>% 
+    lapply(colMeans) %>% 
+    bind_rows() %>% 
+    t() %>% 
+    `colnames<-`(c("UMAP1","UMAP2"))
+  
+  mst <- centroids %>% 
+    TSCAN::createClusterMST(clusters = NULL)
+  
+  line.data <- TSCAN::reportEdges(centroids, mst = mst, clusters = NULL)
+  
+  return(line.data)
+}
+```
+
+```{r, fig.width=8, fig.height=4}
+plotGenePseudoBulk <- function(gene, cm.pseudo, legend = T) {
+  idx <- cm.pseudo %>% 
+    colnames() %>% 
+    data.frame(id = .) %>% 
+    mutate(condition = strsplit(id, "_|!!") %>% sget(1),
+           ct = strsplit(id, "!!") %>% sget(2)) %>% 
+    mutate(ord = order(condition, ct))
+  
+  x <- cm.pseudo %>% 
+    .[match(gene, rownames(.)), match(colnames(na.omit(.)), colnames(.))] %>%
+    .[idx$ord]
+  
+  plot.dat <- x %>% 
+    {data.frame(sample = names(.), 
+                value = unname(.))} %>%
+    mutate(anno = strsplit(sample, "!!") %>% 
+             sget(2),
+           condition = strsplit(sample, "!!|_") %>% 
+             sget(1)) %>%
+    mutate(anno = factor(anno))
+  
+  stat.test <- plot.dat %>% 
+    group_by(anno) %>% 
+    rstatix::wilcox_test(value ~ condition) %>% 
+    rstatix::add_xy_position(x = "anno", step.increase = 0.1)
+  
+  p <- plot.dat %>% 
+    ggplot(aes(anno, value)) +
+    geom_boxplot(aes(fill = condition)) +
+    theme_bw() +
+    theme(line = element_blank(),
+          axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+          axis.ticks.x = element_line()) +
+    labs(x = "", y = "Normalized pseudobulk expression", fill = "", title = paste0(gene, " expression")) +
+    scale_fill_manual(values = ggsci::pal_jama()(3)) +
+    stat_compare_means(aes(fill = condition), method = "kruskal", label = "p.signif") +
+    stat_pvalue_manual(stat.test)
+  
+  if (!legend) p <- p + guides(fill = "none")
+  
+  return(p)
+}
+```
+
+# Figure 1
+
+## Figure 1b
+
+```{r, fig.width=5.7, fig.height=4}
+con$plotGraph(groups = anno.major, 
+              embedding = "UMAP",
+              size = 0.1, 
+              palette = pal.major, 
+              font.size = 3, 
+              raster = T, 
+              show.labels = T,
+              plot.na = F, 
+              show.legend = T,
+              legend.title = "Cell type", 
+              alpha = 0.05) + 
+  dotSize(3) +
+  labs(x="UMAP1", y= "UMAP2") +
+  theme(line = element_blank())
+```
+
+## Figure 1c
+
+```{r fig.height=24, fig.width=8}
+c("RBFOX3","MOG","VCAN","AQP4","CSF1R","PDGFRB","PTPRC","MRC1","GAD1","SLC17A7","PPP1R1B") %>%
+  sort() %>% 
+  lapply(function(g) con$plotGraph(embedding = "UMAP", gene=g, title=g, size=0.1, plot.na = F, palette = colorRampPalette(c("grey90","firebrick"))) + theme(line = element_blank())) %>%
+  cowplot::plot_grid(plotlist=., ncol=2)
+```
+
+## Figure 1d
+
+```{r, fig.height=4, fig.width=5}
+cm.merged <- con$getJointCountMatrix()
+
+markers <- c("AQP4","PTPRC","CSF1R","RBFOX3","SLC17A7","GAD1","PPP1R1B","MOG","VCAN","PDGFRB","MRC1")
+
+dotPlot(markers, 
+        cm.merged, 
+        anno.major %>% 
+          factor(., levels = sort(levels(.))[c(1,3,5,2,4,6,7:10)]), 
+        cols = c("white","firebrick"), 
+        gene.order = markers)
+```
+
+# Figure 2
+
+## Load data
+
+```{r}
+cao_msa <- qread("cao_major_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_major_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_major_dis.qs", nthreads = 10)
+```
+
+## Figure 2a
+
+```{r}
+spc <- con$getDatasetPerCell()
+
+cpc <- spc %>% 
+  as.character() %>% 
+  grepl.replace(c("CTRL","MSA","PD")) %>% 
+  `names<-`(names(spc))
+
+con$plotGraph(groups = cpc, 
+              embedding = "UMAP",
+              size = 0.1, 
+              alpha = 0.05,
+              palette = pal.major, 
+              font.size = 3, 
+              raster = T, 
+              show.labels = T,
+              plot.na = F,
+              mark.groups = F,
+              show.legend = T) + 
+  labs(x="UMAP1", y= "UMAP2", col = "") +
+  theme(legend.position = "bottom",
+        line = element_blank()) +
+  dotSize(3)
+```
+
+## Figure 2b
+
+```{r, fig.height=4, fig.width=3}
+cao_msa$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nMSA")) +
+  labs(x = "", y = "")
+```
+
+## Figure 2c
+
+```{r, fig.height=4, fig.width=3}
+cao_pd$plotCellLoadings(show.pvals = F, 
+                        alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nPD")) +
+  geom_vline(xintercept = 7.5, col = "red") +
+  labs(x = "", y = "")
+```
+
+## Figure 2d
+
+```{r, fig.height=4, fig.width=3}
+cao_dis$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nPD",0,"1\nMSA")) +
+  geom_vline(xintercept = 5.5, col = "red") +
+  labs(x = "", y = "")
+```
+
+## Figure 2e
+
+```{r, fig.width = 6, fig.height = 4}
+cao_msa$cell.groups.palette <- pal.major
+cao_pd$cell.groups.palette <- pal.major
+cao_dis$cell.groups.palette <- pal.major
+
+cao_msa$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+```
+
+# Figure 3
+
+## Load data
+
+```{r}
+cao <- qread("cao_neurons.qs", nthreads = 10)
+cao_msa <- qread("cao_neurons_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_neurons_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_neurons_dis.qs", nthreads = 10)
+```
+
+## Figure 3a
+
+```{r, fig.height=4, fig.width=4}
+cao$plotEmbedding(groups = cao$cell.groups,
+                  size = 0.1, 
+                  palette = pal.major, 
+                  font.size = 3, 
+                  raster = T, 
+                  show.labels = T,
+                  plot.na = F,
+                  alpha = 0.1) + 
+  theme(line = element_blank()) +
+  labs(x="largeVis1", y= "largeVis2")
+```
+
+## Figure 3b
+
+```{r, fig.width=6.7, fig.height=4}
+cm.merged <- cao$data.object$getJointCountMatrix()
+
+markers <- c("GAD1","GAD2","PPP1R1B","SLC17A7","CHAT","CALB2","DCC","ID2","MEIS2","ST18","NKX2-1","NR2F2","PAX6","PVALB","RXFP1","SST","VIP","RELN","SATB2","DRD1","DRD2","FOXP2", "LRP8", "VLDLR")
+
+dotPlot(markers, 
+        cm.merged, 
+        anno.neurons, 
+        cols = c("white","firebrick"), 
+        gene.order = markers)
+```
+
+## Figure 3c
+
+```{r, fig.height=4, fig.width=3}
+cao_msa$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nMSA")) +
+  labs(x = "", y = "")
+```
+
+## Figure 3d
+
+```{r, fig.height=4, fig.width=3}
+cao_pd$plotCellLoadings(show.pvals = F, 
+                        alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nPD")) +
+  geom_vline(xintercept = 13.5, col = "red") +
+  labs(x = "", y = "")
+```
+
+## Figure 3e
+
+```{r, fig.height=4, fig.width=3}
+cao_dis$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nPD",0,"1\nMSA")) +
+  labs(x = "", y = "")
+```
+
+## Figure 3f
+
+```{r, fig.height=4, fig.width=4}
+sample.groups <- cao$sample.groups
+
+cao$plotCellDensity(show.cell.groups = F)$CTRL +
+  geom_circle(aes(x0 = 0.75, y0 = -4.5, r = 1)) +
+  geom_circle(aes(x0 = 3.8, y0 = -1.1, r = 0.5), col = "cyan3") +
+  theme(line = element_blank())
+
+# MSA
+cao$sample.groups <- sample.groups %>% 
+  names() %>% 
+  grepl.replace(c("CTRL","MSA","PD")) %>% 
+  `names<-`(sample.groups %>% names()) %>% 
+  .[. %in% c("CTRL","MSA")]
+cao$target.level <- "MSA"
+cao$estimateCellDensity(method = "graph", name = "msa.density")
+cao$estimateDiffCellDensity(type = "subtract", name = "msa.density")
+cao$plotCellDensity(show.cell.groups = F, name = "msa.density")$MSA +
+  geom_circle(aes(x0 = 0.75, y0 = -4.5, r = 1)) +
+  geom_circle(aes(x0 = 3.8, y0 = -1.1, r = 0.5), col = "cyan3") +
+  theme(line = element_blank())
+
+# PD
+cao$sample.groups <- sample.groups %>%
+  names() %>%
+  grepl.replace(c("CTRL","MSA","PD")) %>%
+  `names<-`(sample.groups %>% names()) %>%
+  .[. %in% c("CTRL","PD")]
+cao$target.level <- "PD"
+cao$estimateCellDensity(method = "graph", name = "pd.density")
+cao$estimateDiffCellDensity(type = "subtract", name = "pd.density")
+cao$plotCellDensity(show.cell.groups = F, name = "pd.density")$PD +
+  geom_circle(aes(x0 = 0.75, y0 = -4.5, r = 1)) +
+  geom_circle(aes(x0 = 3.8, y0 = -1.1, r = 0.5), col = "cyan3") +
+  theme(line = element_blank())
+```
+
+## Figure 3g
+
+```{r, fig.width = 8.5, fig.height = 5}
+cao_msa$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+```
+
+# Figure 4
+
+## Load data
+
+```{r}
+con.glia <- qread("/work/msa/02_data/conos/con_oligo_astro_opc.qs", nthreads = 10)
+
+cao_msa <- qread("cao_oligo_astro_opc_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_oligo_astro_opc_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_oligo_astro_opc_dis.qs", nthreads = 10)
+```
+
+## Figure 4a
+
+```{r, fig.width=4, fig.height=4}
+con.glia$plotGraph(groups = anno.glia, 
+                   plot.na = F, 
+                   size = 0.1,
+                   palette = pal.major, 
+                   font.size = 3, 
+                   raster = T, 
+                   show.labels = T, embedding = "largeVis_CPCA_AS01",
+                   alpha = 0.05) + 
+  labs(x = "largeVis1", y = "largeVis2") +
+  theme(line = element_blank())
+```
+
+## Figure 4b
+
+```{r, fig.height=4, fig.width=4.5}
+cm.merged <- con.glia$getJointCountMatrix()
+
+markers <- c("AQP4","TNC","MOG","LINC01608","SLC5A11","SGCZ","VCAN","OLIG2")
+
+dotPlot(markers, 
+        cm.merged, 
+        anno.glia,
+        cols = c("white","firebrick"), 
+        gene.order = markers)
+```
+
+## Figure 4c
+
+```{r, fig.height=4, fig.width=3}
+cao_msa$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) +
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nMSA")) +
+  geom_vline(xintercept = 6.5, col = "red") +
+  labs(x = "", y = "")
+```
+
+## Figure 4d
+
+```{r, fig.height=4, fig.width=3}
+cao_pd$plotCellLoadings(show.pvals = F, 
+                        alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nPD")) +
+  geom_vline(xintercept = 4.5, col = "red") +
+  labs(x = "", y = "")
+```
+
+## Figure 4e
+
+```{r, fig.height=4, fig.width=3}
+cao_dis$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none",
+        line = element_blank()) +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nPD",0,"1\nMSA")) +
+  geom_vline(xintercept = 6.5, col = "red") +
+  labs(x = "", y = "")
+```
+
+## Figure 4f
+
+```{r, fig.width = 7, fig.height = 5}
+cao_msa$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+```
+
+## Figure 4h,i
+
+```{r, fig.width=14, fig.height=5}
+cao_msa <- qread("cao_astro_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_astro_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_astro_dis.qs", nthreads = 10)
+
+df.all <- Map(getOntWithFamily, list(cao_msa, cao_pd, cao_dis), c("CTRL vs. MSA", "CTRL vs. PD", "PD vs. MSA")) %>% 
+  lget("df.all") %>% 
+  bind_rows() %>% 
+  mutate(Group = paste0("AS_", strsplit(Group, "_") %>% sget(1) %>% tolower()))
+
+# Select relevant pathways
+p.ids <- c("GO:0050821", "GO:0050728", "GO:0006986", "GO:0030168", "GO:0030001", "GO:1904707", "GO:0140053", "GO:0006486", "GO:0010717", "GO:0031113", "GO:0032675", "GO:0061041", "GO:0071222", "GO:0045766", "GO:0006487", "GO:0097501", "GO:0042776", "GO:0045047", "GO:0044794", "GO:0035633", "GO:0097242", "GO:0006120", "GO:0042026", "GO:0006979", "GO:0071222", "GO:0017015", "GO:0009611", "GO:1901201", "GO:0042594", "GO:0097501", "GO:0006123", "GO:0006909", "GO:0007179", "GO:0006120", "GO:0097501")
+```
+
+### Figure 4h
+
+```{r, fig.width=14, fig.height=3}
+ct <- "AS_homeostatic"
+
+df.sel <- df.all %>% 
+  filter(Group == ct)
+
+p1 <- ggplot(df.sel, aes(NES, logp, col = comp, shape = comp)) +
+  geom_point(data = ~filter(., p.adjust > 0.05), size = 0.1, alpha = 0.5, col = "black") +
+  geom_point(data = ~filter(., p.adjust <= 0.05), size = 2, alpha = 0.8) +
+  theme_bw() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  scale_color_manual(values = pal.major) +
+  theme(line = element_blank()) +
+  labs(y = "-log10(adj. p)", shape = "Comparison", col = "Comparison") +
+  dotSize(3)
+
+df <- Map(getOntWithFamily, list(cao_msa, cao_pd, cao_dis), c("CTRL vs. MSA", "CTRL vs. PD", "PD vs. MSA")) %>% 
+  lget("df") %>% 
+  bind_rows() %>% 
+  mutate(Group = paste0("AS_", strsplit(Group, "_") %>% sget(1) %>% tolower())) %>% 
+  filter(Group == ct,
+         ID %in% p.ids)
+
+p2 <- df %>% 
+  filter(p.adjust <= 0.05, NES > 0) %>% 
+  mutate(Group = factor(Group, levels = sort(unique(Group)))) %>% 
+  select(Description, NES, Group, comp) %>%
+  as.data.frame() %>% 
+  group_by(comp, Group) %>% 
+  group_split() %>% 
+  lapply(dplyr::slice, seq(5)) %>%
+  bind_rows() %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = comp)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for up-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+p3 <- df %>% 
+  filter(p.adjust <= 0.05, NES < 0) %>% 
+  select(Description, NES, Group, comp) %>%
+  group_by(comp, Group) %>% 
+  group_split() %>% 
+  lapply(dplyr::slice, seq(5)) %>% 
+  bind_rows() %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = comp)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for down-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
+```
+
+### Figure 4i
+
+```{r, fig.width=14, fig.height=3}
+ct <- "AS_reactive"
+
+df.sel <- df.all %>% 
+  filter(Group == ct)
+
+p1 <- ggplot(df.sel, aes(NES, logp, col = comp, shape = comp)) +
+  geom_point(data = ~filter(., p.adjust > 0.05), size = 0.1, alpha = 0.5, col = "black") +
+  geom_point(data = ~filter(., p.adjust <= 0.05), size = 2, alpha = 0.8) +
+  theme_bw() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  scale_color_manual(values = pal.major) +
+  theme(line = element_blank()) +
+  labs(y = "-log10(adj. p)", shape = "Comparison", col = "Comparison") +
+  dotSize(3)
+
+df <- Map(getOntWithFamily, list(cao_msa, cao_pd, cao_dis), c("CTRL vs. MSA", "CTRL vs. PD", "PD vs. MSA")) %>% 
+  lget("df") %>% 
+  bind_rows() %>% 
+  mutate(Group = paste0("AS_", strsplit(Group, "_") %>% sget(1) %>% tolower())) %>% 
+  filter(Group == ct,
+         ID %in% p.ids)
+
+p2 <- df %>% 
+  filter(p.adjust <= 0.05, NES > 0) %>% 
+  mutate(Group = factor(Group, levels = sort(unique(Group)))) %>% 
+  select(Description, NES, Group, comp) %>%
+  group_by(comp, Group) %>% 
+  group_split() %>% 
+  lapply(dplyr::slice, seq(5)) %>%
+  bind_rows() %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = comp)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for up-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+p3 <- df %>% 
+  filter(p.adjust <= 0.05, NES < 0) %>% 
+  select(Description, NES, Group, comp) %>%
+  group_by(comp, Group) %>% 
+  group_split() %>% 
+  lapply(dplyr::slice, seq(5)) %>% 
+  bind_rows() %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = comp)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for down-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
+```
+
+## Figure 4j
+
+```{r, fig.width=14, fig.height=3}
+cao_msa <- qread("cao_oligo_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_oligo_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_oligo_dis.qs", nthreads = 10)
+
+df.all <- Map(getOntWithFamily, list(cao_msa, cao_pd, cao_dis), c("CTRL vs. MSA", "CTRL vs. PD", "PD vs. MSA")) %>% 
+  lget("df.all") %>% 
+  bind_rows() %>% 
+  mutate(Group = paste0("OL_", strsplit(Group, "_") %>% sget(2) %>% gsub("SCGZ", "SGCZ", .)))
+
+# Select relevant pathways
+p.ids <- c("GO:0071345", "GO:0045596", "GO:0060271", "GO:0048709", "GO:0006986", "GO:0016032", "GO:0060271", "GO:0042026", "GO:0006986", "GO:0120034", "GO:0071346", "GO:1904262", "GO:0042776", "GO:0061077", "GO:0050821", "GO:0045047", "GO:0042776", "GO:0050821", "GO:0045047", "GO:0007042", "GO:0042776", "GO:0061077", "GO:0045047", "GO:0042776", "GO:0045047", "GO:2000249", "GO:0002474", "GO:0042026", "GO:0002040", "GO:0046330", "GO:0043542", "GO:0030036", "GO:0032981", "GO:0007042")
+
+ct <- "OL_SLC5A11"
+
+df.sel <- df.all %>% 
+  filter(Group == ct)
+
+p1 <- ggplot(df.sel, aes(NES, logp, col = comp, shape = comp)) +
+  geom_point(data = ~filter(., p.adjust > 0.05), size = 0.1, alpha = 0.5, col = "black") +
+  geom_point(data = ~filter(., p.adjust <= 0.05), size = 2, alpha = 0.8) +
+  theme_bw() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  scale_color_manual(values = pal.major) +
+  theme(line = element_blank()) +
+  labs(y = "-log10(adj. p)", shape = "Comparison", col = "Comparison") +
+  dotSize(3)
+
+df <- Map(getOntWithFamily, list(cao_msa, cao_pd, cao_dis), c("CTRL vs. MSA", "CTRL vs. PD", "PD vs. MSA")) %>% 
+  lget("df") %>% 
+  bind_rows() %>% 
+  mutate(Group = paste0("OL_", strsplit(Group, "_") %>% sget(2) %>% gsub("SCGZ", "SGCZ", .))) %>% 
+  filter(Group == ct,
+         ID %in% p.ids)
+
+p2 <- df %>% 
+  filter(p.adjust <= 0.05, NES > 0) %>% 
+  mutate(Group = factor(Group, levels = sort(unique(Group)))) %>% 
+  select(Description, NES, Group, comp) %>%
+  group_by(comp, Group) %>% 
+  group_split() %>% 
+  lapply(dplyr::slice, seq(5)) %>%
+  bind_rows() %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = comp)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for up-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+p3 <- df %>% 
+  filter(p.adjust <= 0.05, NES < 0) %>% 
+  select(Description, NES, Group, comp) %>%
+  group_by(comp, Group) %>% 
+  group_split() %>% 
+  lapply(dplyr::slice, seq(5)) %>% 
+  bind_rows() %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = comp)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for down-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
+```
+
+## Figure 4k,l
+
+```{r}
+cm.merged <- con$getJointCountMatrix(raw = T) %>% 
+  Matrix::t() %>% 
+  .[, colnames(.) %in% names(anno.glia)]
+
+# Create sample-wise annotation
+anno.donor <- con$getDatasetPerCell()[colnames(cm.merged)]
+anno.subtype <- anno.glia %>% 
+  .[!is.na(.)] %>% 
+  factor()
+
+idx <- intersect(anno.donor %>% names(), anno.subtype %>% names())
+
+anno.donor %<>% .[idx]
+anno.subtype %<>% .[idx] %>% 
+  {`names<-`(as.character(.), names(.))}
+
+anno.final <- paste0(anno.donor,"!!",anno.subtype) %>% 
+  `names<-`(anno.donor %>% names())
+
+# Create pseudo CM
+cm.pseudo <- sccore::collapseCellsByType(cm.merged %>% Matrix::t(), 
+                                         groups = anno.final, min.cell.count = 1) %>% 
+  t() %>%
+  apply(2, as, "integer")
+
+cm.pseudo %<>% 
+  {. + 1} %>% 
+  DESeq2::DESeqDataSetFromMatrix(., 
+                                 colnames(.) %>% 
+                                   strsplit("_") %>% 
+                                   sget(1) %>% 
+                                   data.frame() %>% 
+                                   `dimnames<-`(list(colnames(cm.pseudo), "group")), 
+                                 design = ~ group) %>% 
+  DESeq2::estimateSizeFactors() %>% 
+  DESeq2::counts(normalized = T)
+```
+
+### Figure 4k
+
+```{r, fig.width=4, fig.height=4}
+# For DE between visits
+genes <- "TLR1"
+
+idx <- cm.pseudo %>% 
+  colnames() %>% 
+  data.frame(id = .) %>% 
+  mutate(condition = strsplit(id, "_|!!") %>% sget(1),
+         ct = strsplit(id, "!!") %>% sget(2)) %>% 
+  mutate(ord = order(condition, ct))
+
+x <- cm.pseudo %>% 
+  .[match(genes, rownames(.)), match(colnames(na.omit(.)), colnames(.))] %>%
+  .[idx$ord]
+
+plot.dat <- x %>% 
+  {data.frame(sample = names(.), 
+              value = unname(.))} %>%
+  mutate(anno = strsplit(sample, "!!") %>% 
+           sget(2),
+         condition = strsplit(sample, "!!|_") %>% 
+           sget(1)) %>% 
+  filter(anno %in% c("OL_LINC01608", "OL_SGCZ", "OL_SLC5A11")) %>% 
+  mutate(anno = factor(anno))
+
+stat.test <- plot.dat %>% 
+  group_by(anno) %>% 
+  rstatix::wilcox_test(value ~ condition) %>% 
+  rstatix::add_xy_position(x = "anno", step.increase = 0.1, fun = "mean_sd", scales = "free")
+
+plot.dat %>% 
+  ggplot(aes(anno, value)) +
+  geom_boxplot(aes(fill = condition)) +
+  theme_bw() +
+  theme(line = element_blank(),
+        axis.ticks.x = element_line(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  labs(x = "", y = "Normalized pseudobulk expression", fill = "", title = "TLR1 expression") +
+  scale_fill_manual(values = ggsci::pal_jama()(3)) +
+  stat_compare_means(aes(fill = condition), method = "kruskal", label = "p.signif", label.y = 8.5e2) +
+  stat_pvalue_manual(stat.test)
+```
+
+### Figure 4l
+
+```{r, fig.width=4, fig.height=4}
+# For DE between visits
+genes <- "LRP1"
+
+idx <- cm.pseudo %>% 
+  colnames() %>% 
+  data.frame(id = .) %>% 
+  mutate(condition = strsplit(id, "_|!!") %>% sget(1),
+         ct = strsplit(id, "!!") %>% sget(2)) %>% 
+  mutate(ord = order(condition, ct))
+
+x <- cm.pseudo %>% 
+  .[match(genes, rownames(.)), match(colnames(na.omit(.)), colnames(.))] %>%
+  .[idx$ord]
+
+plot.dat <- x %>% 
+  {data.frame(sample = names(.), 
+              value = unname(.))} %>%
+  mutate(anno = strsplit(sample, "!!") %>% 
+           sget(2),
+         condition = strsplit(sample, "!!|_") %>% 
+           sget(1)) %>% 
+  filter(anno %in% c("OL_LINC01608", "OL_SGCZ", "OL_SLC5A11")) %>% 
+  mutate(anno = factor(anno))
+
+stat.test <- plot.dat %>% 
+  group_by(anno) %>% 
+  rstatix::wilcox_test(value ~ condition) %>% 
+  rstatix::add_xy_position(x = "anno", step.increase = 0.1)
+
+plot.dat %>% 
+  ggplot(aes(anno, value)) +
+  geom_boxplot(aes(fill = condition)) +
+  theme_bw() +
+  theme(line = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        axis.ticks.x = element_line()) +
+  labs(x = "", y = "Normalized pseudobulk expression", fill = "", title = "LRP1 expression") +
+  scale_fill_manual(values = ggsci::pal_jama()(3)) +
+  stat_compare_means(aes(fill = condition), method = "kruskal", label = "p.signif", label.y = 175) +
+  stat_pvalue_manual(stat.test) +
+  ylim(c(0, 180))
+```
+
+## Figure 4m
+
+For calculation of data, see `Liana.ipynb`.
+
+```{r, fig.width=10, fig.height=8}
+dat <- read.delim("liana_res.csv",
+                  sep = ",",
+                  header = T) %>%
+  mutate(group = strsplit(sample, "_") %>%
+           sget(1))
+
+dat.plot <- dat %>% 
+  dplyr::rename(ligand = ligand_complex,
+         receptor = receptor_complex,
+         score = lrscore) %>%
+  filter(target == "Oligodendrocytes",
+         ligand %in% c("BMP1", "SERPINE2", "PSAP", "APOE", "APP", "SERPING1"),
+         receptor %in% c("LRP1", "BMPR1A", "LRP4")) %>%
+  group_by(group, ligand, receptor, source, target) %>% 
+  summarize(score = mean(score)) %>% 
+  ungroup() %>% 
+  arrange(group, source, target, ligand, receptor)
+
+dat.msa <- dat.plot %>% 
+  filter(group == "MSA",
+         score > 0.39) %>% 
+  mutate(lrst = paste0(ligand, receptor, source, target))
+
+dat.pd <- dat.plot %>% 
+  mutate(lrst = paste0(ligand, receptor, source, target)) %>% 
+  filter(group == "PD",
+         lrst %in% dat.msa$lrst)
+
+dat.rel <- dat.msa %>% 
+  mutate(score = score - dat.pd$score)
+
+dat.rel %>% 
+  lianaCircos()
+```
+
+# Figure 5 & EDF7
+
+## Load data
+
+```{r}
+cao <- qread("cao_micro_pvm.qs", nthreads = 10)
+cao_msa <- qread("cao_micro_pvm_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_micro_pvm_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_micro_pvm_dis.qs", nthreads = 10)
+```
+
+```{r}
+sample.groups <- cao$sample.groups
+```
+
+## Figure 5a
+
+```{r}
+cao$plotEmbedding(groups = anno.micro,
+                  size = 0.5, 
+                  palette = pal.major, 
+                  font.size = 3, 
+                  raster = T, 
+                  mark.groups = T,
+                  plot.na = F,
+                  alpha = 0.2) + 
+  labs(x="UMAP1", y= "UMAP2") +
+  theme(line = element_blank())
+```
+
+## Figure 5b
+
+```{r, fig.width=4, fig.height=4}
+cm.merged <- cao$data.object$getJointCountMatrix()
+
+markers <- c("AIF1","F13A1","MRC1","CD163","CD74")
+
+dotPlot(markers, 
+        cm.merged, 
+        cao$cell.groups, 
+        cols = c("white","firebrick"))
+```
+
+## Figure 5d-f
+
+```{r}
+anno.sort <- anno.micro[rownames(cao$data.object$embedding)]
+anno.sel <- anno.sort[!anno.sort %in% c("MIC_intermediate1", "PVMs")] %>% factor()
+anno.sel2 <- anno.sort[!anno.sort %in% c("MIC_intermediate2", "MIC_activated")] %>% factor()
+
+ldata1 <- getTscanTrajectory(cao$data.object, anno.sel)
+ldata2 <- getTscanTrajectory(cao$data.object, anno.sel2)
+
+ldata <- rbind(ldata1, ldata2)
+```
+
+### Figure 5d
+
+```{r}
+cao$data.object$embedding %>% 
+  as.data.frame() %>% 
+  mutate(., unname(anno.micro[rownames(.)])) %>% 
+  setNames(c("UMAP1", "UMAP2", "annotation")) %>% 
+  ggplot() + 
+  geom_point(aes(UMAP1, UMAP2, col = annotation), size = 0.3) +
+  geom_line(data = ldata, mapping=aes(UMAP1, UMAP2, group = edge), linewidth = 1) +
+  theme_bw() + 
+  theme(legend.position = "right",
+        line = element_blank()) + 
+  labs(col = "", x = "UMAP1", y = "UMAP2") +
+  scale_colour_manual(values = pal.major) +
+  dotSize(3)
+```
+
+## Figures 5e,f & EDF7
+
+Prepare data
+
+```{r}
+emb <- cao$data.object$embedding %>% 
+  `colnames<-`(c("UMAP1","UMAP2")) %>% 
+  .[rownames(.) %in% names(anno.sel2), ]
+
+sds_obj <- slingshot(emb, 
+                     anno.sel2, 
+                     start.clus = "MIC_steady-state",
+                     stretch = 0
+)
+
+sds <- as.SlingshotDataSet(sds_obj)
+
+pseudotime <- sds_obj@assays@data@listData$pseudotime[, 1]
+```
+
+Here, we show the code for running the generalized additive mixed model. It takes a significant amount of time to run, we provide data in `pseudotime_micro_l2.qs`.
+
+```{r, eval = F}
+mat <- cao$data.object$getJointCountMatrix() %>%
+  .[match(names(sds_obj), rownames(.)), colSums(.) > 2e2] %>% 
+  .[, !grepl(pattern = "RPL|RPS|MT-", colnames(.))]
+
+mt <- mat %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  {message("Mutating"); mutate(.,
+                               pseudotime = pseudotime[rowname],
+                               condition = cao$data.object$getDatasetPerCell()[rowname] %>%
+                                 as.character() %>%
+                                 strsplit("_") %>%
+                                 sget(1),
+                               sample = strsplit(rowname, "!!") %>%
+                                 sget(1))} %>%
+  .[complete.cases(.), ] %>%
+  {message("Melting"); reshape2::melt(., id.vars = c("rowname", "pseudotime", "condition", "sample"))} %$%
+  {message("Splitting"); split(., variable)}
+```
+
+```{r, eval = F}
+library(gamm4)
+
+res <- mt %>% 
+  sccore::plapply(\(x) {
+    fit_full <- gamm4(data = x, formula = value ~ s(pseudotime, by = factor(condition)), random = ~(1 | sample), REML = F)
+    fit_reduced <- gamm4(data = x, formula = value ~ s(pseudotime), random = ~(1 | sample), REML = F)
+    fit_none <- gamm4(data = x, formula = value ~ 1, random = ~(1 | sample), REML = F)
+    
+    ann <- anova(fit_full$mer, fit_reduced$mer, fit_none$mer)
+    
+    if (any(ann$`Pr(>Chisq)` <= 0.05, na.rm = T)) {
+      residuals <- predict(fit_full$gam, se.fit = T)$fit %>% 
+        unname()
+      
+      r.sq <- c(summary(fit_full$gam)$r.sq, summary(fit_reduced$gam)$r.sq) %>% 
+        setNames(c("full", "reduced"))
+      
+      out <- list(anova = ann,
+                  residuals = residuals,
+                  r.sq = r.sq)
+      
+      return(out)
+    }
+  }, n.cores = 40, mc.preschedule = T, mc.cleanup = T, progress = F) %>%
+  .[!sapply(., is.null)]
+
+qsave(res, "pseudotime_micro_l2.qs")
+```
+
+### Figure 5e
+
+```{r}
+cao$data.object$embedding %>% 
+  as.data.frame() %>% 
+  mutate(., unname(anno.micro[rownames(.)])) %>% 
+  setNames(c("UMAP1", "UMAP2", "annotation")) %>% 
+  mutate(., pseudotime = pseudotime[rownames(.)]) %>%
+  ggplot() +
+  geom_point(aes(UMAP1, UMAP2, col = pseudotime), size = 0.3) +
+  geom_line(data = ldata2, aes(UMAP1, UMAP2, group = edge), size = 1) +
+  theme_bw() +
+  theme(line = element_blank()) +
+  scale_color_gradient(low = "navyblue", high = "orange") +
+  labs(col = "Pseudotime", x = "UMAP1", y = "UMAP2")
+```
+
+### Figure 5f
+
+Please note, row order may change per iteration.
+
+```{r, fig.height=4, fig.width=4}
+res <- qread("pseudotime_micro_l2.qs")
+
+rsq.pseudo <- res %>% 
+  sapply(\(gene) gene$r.sq[1]) %>% 
+  sort(decreasing = T)
+
+res.filter <- res[names(rsq.pseudo)[seq(50)] %>% strsplit(".", fixed = T) %>% sget(1)]
+
+cm.merged <- cao$data.object$getJointCountMatrix() %>% 
+  .[match(names(pseudotime), rownames(.)), colnames(.) %in% names(res.filter)] %>% 
+  .[rowSums(.) > 0, ]
+
+## Predict smoothend expression 
+pseudotime.both <- pseudotime[rownames(cm.merged)]
+weights.both <- sds_obj@assays@data@listData$weights %>% .[match(names(pseudotime.both), rownames(.)), 1] + 1E-7
+
+scFit <- cm.merged %>% 
+  Matrix::t() %>% 
+  tradeSeq::fitGAM(pseudotime = pseudotime.both, cellWeights = weights.both, verbose = T)
+
+Smooth <- tradeSeq::predictSmooth(scFit, gene = colnames(cm.merged), tidy = F, n=100)
+
+# Average across replicates and scale
+Smooth <- t(scale(t(Smooth)))
+
+# Seriate the results
+Smooth <- Smooth[ seriation::get_order(seriation::seriate(Smooth, method="PCA_angle")), ]
+
+# Create heatmap
+col_fun = circlize::colorRamp2(c(-4, 0, 4), c("navy", "white", "firebrick"))
+
+Heatmap(Smooth, 
+        col = col_fun,
+        cluster_columns=F, 
+        cluster_rows=F, 
+        show_column_names = F, 
+        row_names_gp = grid::gpar(fontsize = 5))
+```
+
+### Extended Data Figure 7
+
+We provide this figure here since all data are already loaded.
+
+```{r, fig.height=40, fig.width=20}
+cpc <- pseudotime %>% 
+  names() %>% 
+  strsplit("_") %>% 
+  sget(1) %>% 
+  factor()
+
+res[rownames(Smooth)] %>% 
+  lget("residuals") %>% 
+  lapply(as.data.frame) %>% 
+  lapply(setNames, "residuals") %>% 
+  lapply(mutate, group = cpc, pseudotime = pseudotime) %>% 
+  data.table::rbindlist(idcol = "gene") %>% 
+  ggplot(aes(pseudotime, residuals, col = group)) +
+  geom_smooth() +
+  theme_bw() +
+  facet_wrap(~gene, ncol = 5, scales = "free")
+```
+
+## Figure 5g
+
+```{r, fig.height=4, fig.width=3}
+cao_msa$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) +
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none") +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nMSA")) +
+  geom_vline(xintercept = 4.5, col = "red") +
+  labs(x = "", y = "") +
+  theme(line = element_blank())
+```
+
+## Figure 5h
+
+```{r, fig.height=4, fig.width=3}
+cao_pd$plotCellLoadings(show.pvals = F, 
+                        alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none") +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nCTRL",0,"1\nPD")) +
+  geom_vline(xintercept = 4.5, col = "red") +
+  labs(x = "", y = "") +
+  theme(line = element_blank())
+```
+
+## Figure 5i
+
+```{r, fig.height=4, fig.width=3}
+cao_dis$plotCellLoadings(show.pvals = F, 
+                         alpha = 0)$data %>% 
+  ggplot(aes(ind, values, fill = ind)) + 
+  geom_hline(yintercept = 0, col = "black") +
+  geom_violin() + 
+  coord_flip() + 
+  theme_bw() + 
+  scale_fill_manual(values = pal.major) + 
+  theme(legend.position = "none") +
+  scale_y_continuous(breaks = c(-1,0,1), 
+                     limits = c(-1,1),
+                     labels = c("-1\nPD",0,"1\nMSA")) +
+  geom_vline(xintercept = 3.5, col = "red") +
+  labs(x = "", y = "") +
+  theme(line = element_blank())
+```
+
+## Figure 5k
+
+We provide combined data from the RNAscope experiments as a single file `res.qs`.
+
+```{r}
+res <- qread("RNAscope.qs") %>% 
+  filter(target == "AIF1", Ch1NumSpots > 0) %>% 
+  arrange(file)
+
+area <- read.table("RNAscope_areas.tsv", sep = "\t", header = T) %>% # Million pixels
+  mutate(file = paste(File.name, Tissue, sep = "")) %>% 
+  filter(file %in% res$file) %>% 
+  arrange(file) %>% 
+  mutate(rel_px = px.2 / 1E6)
+```
+
+```{r, fig.width=4, fig.height=8}
+p1 <- res %>% 
+  group_by(group, target, file) %>% 
+  summarize(spots = mean(Ch1NumSpots)) %>% 
+  ggplot(aes(group, spots, fill = group)) + 
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  theme_bw() +
+  labs(y = "Mean no. spots per double-positive cell", x = "") +
+  stat_compare_means(method = "kruskal.test", label.y = 115) +
+  stat_compare_means(comparisons = comp, method = "wilcox.test") +
+  theme(line = element_blank()) +
+  guides(fill = "none") +
+  scale_fill_manual(values = pal.major)
+
+p2 <- res %>% 
+  group_by(group, target, file) %>% 
+  summarize(no_cells = n()) %>% 
+  as.data.frame() %>% 
+  arrange(file) %>% 
+  mutate(rel_cells = no_cells / area$rel_px) %>% 
+  ggplot(aes(group, rel_cells, fill = group)) + 
+  geom_boxplot(outliers = F) +
+  geom_jitter(width = 0.2) +
+  theme_bw() +
+  stat_compare_means(method = "kruskal.test", label.y = 17) +
+  stat_compare_means(comparisons = comp, method = "wilcox.test") +
+  labs(y = "No. double-positive cells\nNormalized to area", x = "") +
+  theme(line = element_blank()) +
+  guides(fill = "none") +
+  scale_fill_manual(values = pal.major)
+
+plot_grid(plotlist = list(p1, p2), ncol = 1)
+```
+
+## Figure 5l
+
+```{r, fig.width=12, fig.height=3}
+fams <- cao_msa$test.results[["GSEA"]]$families
+
+df.all <- list(cao_msa$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "up", p.adj = 1, q.value = 1),
+               cao_msa$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "down", p.adj = 1, q.value = 1)) %>% 
+  bind_rows() %>% 
+  mutate(logp = -log10(p.adjust))
+
+# Relevant pathways
+p.ids <- c("GO:0060760", "GO:0002230", "GO:0019915", "GO:1904646", "GO:0042775", "GO:0019646", "GO:0033108", "GO:0035455", "GO:0061077", "GO:0006914", "GO:0042026", "GO:0034340", "GO:0051607", "GO:0060337", "GO:0035455", "GO:0002684", "GO:0036037", "GO:0048514")
+
+df <- cacoa:::getOntologyFamilyChildren(df.all, fams=fams, type = "GSEA", subtype = "BP") %>% 
+  mutate(Group = paste0("MIC_", tolower(Group)) %>% gsub("MIC_pvms", "PVMs", .)) %>% 
+  filter(ID %in% p.ids)
+
+df.all %<>% mutate(Group = paste0("MIC_", tolower(Group)) %>% gsub("MIC_pvms", "PVMs", .))
+
+p1 <- ggplot(df.all, aes(NES, logp, col = Group, shape = Group)) +
+  geom_point(data = ~filter(., p.adjust > 0.05), size = 0.1, alpha = 0.5, col = "black") +
+  geom_point(data = ~filter(., p.adjust <= 0.05), size = 2, alpha = 0.5) +
+  theme_bw() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  scale_color_manual(values = pal.major) +
+  theme(line = element_blank()) +
+  labs(y = "-log10(adj. p)") +
+  dotSize(3)
+
+p2 <- df %>% 
+  filter(p.adjust <= 0.05, NES > 0) %>% 
+  mutate(Group = factor(Group, levels = sort(unique(Group)))) %>% 
+  select(Description, NES, Group) %$% 
+  split(., Group) %>% 
+  lapply(dplyr::slice, seq(5)) %>% 
+  bind_rows() %>% 
+  dplyr::slice(seq(25)) %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = Group)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for up-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+p3 <- df %>% 
+  filter(p.adjust <= 0.05, NES < 0) %>% 
+  select(Description, NES, Group) %>%
+  dplyr::slice(seq(20)) %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = Group)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for down-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
+```
+
+## Figure 5m
+
+```{r, fig.width=12, fig.height=3}
+fams <- cao_pd$test.results[["GSEA"]]$families
+
+df.all <- list(cao_pd$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "up", p.adj = 1, q.value = 1),
+               cao_pd$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "down", p.adj = 1, q.value = 1)) %>% 
+  bind_rows() %>% 
+  mutate(logp = -log10(p.adjust))
+
+# Select relevant pathways
+p.ids <- c("GO:0042776", "GO:0034341", "GO:0001916", "GO:0002503", "GO:0019885", "GO:0016042", "GO:0001909", "GO:0051085", "GO:0045824", "GO:0044000", "GO:0019885", "GO:0044242", "GO:0001944", "GO:0034976", "GO:0019646", "GO:0009205", "GO:0019883", "GO:0070972", "GO:0002474")
+
+df <- cacoa:::getOntologyFamilyChildren(df.all, fams=fams, type = "GSEA", subtype = "BP") %>% 
+  mutate(Group = paste0("MIC_", tolower(Group)) %>% gsub("MIC_pvms", "PVMs", .)) %>% 
+  filter(ID %in% p.ids)
+
+df.all %<>% mutate(Group = paste0("MIC_", tolower(Group)) %>% gsub("MIC_pvms", "PVMs", .))
+
+p1 <- ggplot(df.all, aes(NES, logp, col = Group, shape = Group)) +
+  geom_point(data = ~filter(., p.adjust > 0.05), size = 0.1, alpha = 0.5, col = "black") +
+  geom_point(data = ~filter(., p.adjust <= 0.05), size = 2, alpha = 0.5) +
+  theme_bw() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  scale_color_manual(values = pal.major) +
+  theme(line = element_blank()) +
+  labs(y = "-log10(adj. p)") +
+  dotSize(3)
+
+p2 <- df %>% 
+  filter(p.adjust <= 0.05, NES > 0) %>% 
+  select(Description, NES, Group) %$% 
+  split(., Group) %>% 
+  lapply(dplyr::slice, seq(5)) %>% 
+  bind_rows() %>% 
+  dplyr::slice(seq(25)) %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = Group)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for up-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+p3 <- df %>% 
+  filter(p.adjust <= 0.05, NES < 0) %>% 
+  select(Description, NES, Group) %$% 
+  split(., Group) %>% 
+  lapply(dplyr::slice, seq(5)) %>% 
+  bind_rows() %>% 
+  dplyr::slice(seq(25)) %>% 
+  mutate(., x = 0, y = rev(seq(nrow(.)))) %>% 
+  ggplot(aes(x, y, label = Description, col = Group)) + 
+  geom_text(hjust = 0) +
+  theme_void() +
+  xlim(0, 1) +
+  labs(title = "Selected terms for down-regulated genes") +
+  scale_color_manual(values = pal.major) +
+  guides(col = "none")
+
+plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
+```
+
+# Figure 6
+
+Figures 6c,e,f where made with GraphPad Prism. Data are available in `Phagocytosis_assay_triplicates_raw_data_HH.tsv` (Copenhagen experiment) or `HOUSTON.tsv` (Houston experiment).
+
+## Figure 6b
+
+```{r, fig.height=4, fig.width=5}
+dat <- read.delim("Phagocytosis_assay_triplicates_raw_data_HH.tsv", 
+                  header = T, dec = ",") %>% 
+  tidyr::pivot_longer(names_to = "group", cols = -1, values_to = "value") %>% 
+  mutate(group = gsub(".1|.2", "", group) %>% factor(labels = c("PBS","LPS","MSA CSF","CTRL CSF","PD CSF"))) %>% 
+  mutate(group = factor(group, levels = c("PBS","LPS","CTRL CSF","MSA CSF","PD CSF"))) %>% 
+  group_by(Time, group) %>% 
+  summarize(mean = mean(value, na.rm = T), 
+            sd = sd(value, na.rm = T))
+
+dat %>% 
+  ggplot(aes(Time, mean, group=group, color=group)) + 
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.1) +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  labs(x = "Time (hours)", y = "pHrodo-labelled E. coli uptake - intensity ratio [AU]", col = "Stimulation") +
+  scale_color_manual(values = pal.major) +
+  theme(line = element_blank())
+```
+
+## Figure 6d
+
+```{r, fig.width=4, fig.height=4}
+dat.raw <- read.table("Cytokine_summary.tsv", header = TRUE, sep = "\t", dec = ",")
+
+dat.tmp <- dat.raw %>%
+  melt(id.vars = c("Sample","Group","Condition")) %>% 
+  mutate(variable = variable %>% 
+           as.character() %>% 
+           gsub(".", "-", ., fixed = T) %>% 
+           as.factor()) %>%
+  filter(Condition == "Media", !Group %in% c("PBS","LPS")) %>%
+  filter(Condition == "Media") %>%
+  mutate(Group = Group %>% factor(levels = c("CTRL","MSA","PD")),
+         variable = variable %>% factor())
+
+dat.stat <- dat.raw %>% 
+  select(!IL.8) %>% 
+  mutate(Group = factor(Group, levels = c("PBS","LPS","CTRL","MSA","PD"))) %>% 
+  filter(!Group %in% c("PBS","LPS"))
+
+res.il10 <- FSA::dunnTest(IL10 ~ Group, data = dat.stat %>% {`colnames<-`(., gsub(".", "", colnames(.), fixed = T))}, method = "bh")
+
+stat.test <- dat.tmp %>% 
+  filter(variable == "IL-10") %>% 
+  select(Group, value) %>% 
+  as.data.frame() %>%
+  rstatix::wilcox_test(value ~ Group) %>% 
+  mutate(p = res.il10$res$P.unadj,
+         p.adj = res.il10$res$P.adj %>% formatC(digits = 2),
+         p.adj.signif = c("*","ns","ns")) %>% 
+  rstatix::add_xy_position(x = "Group")
+
+dat.tmp %>% 
+  filter(variable == "IL-10") %>%
+  ggplot(aes(Group, value)) + 
+  geom_point(aes(col = Group), size = 3, position = position_jitter(width = 0.3)) + 
+  theme_bw() +
+  theme(line = element_blank()) +
+  stat_pvalue_manual(stat.test, label = "p.adj", tip.length = 0.01, backet.nudge.y = 3, hide.ns = F) +
+  scale_color_manual(values = pal.major) +
+  labs(x = "", y = "IL-10 pg/mL") +
+  guides(col = "none")
+```
+
+## Figures 6g-i
+
+```{r}
+dat.melt <- read.table("Microglia+CSF_samples_aSyn_sCD163.tsv", header = T, sep = "\t", dec = ",") %>%  
+  melt(id.vars = c("diagnosis", "sex")) %>% 
+  mutate(diagnosis = factor(diagnosis, levels = c("CTRL","MSA","IPD"), labels = c("CTRL","MSA","PD")))
+```
+
+### Figure 6g
+
+```{r, fig.width=4, fig.height=4}
+dat.melt %>% 
+  filter(variable == "sCD163_ng.mL_CSF") %>% 
+  ggplot(aes(diagnosis, value)) +
+  geom_boxplot(aes(fill = diagnosis)) +
+  theme_bw() + 
+  labs(x = "", y = "sCD163 ng/ml", fill = "Diagnosis") +
+  scale_fill_manual(values = pal.major) +
+  stat_compare_means(method = "t.test", comparisons = list(c("CTRL","MSA"), c("MSA","PD"), c("CTRL","PD"))) +
+  guides(fill = "none") +
+  theme(line = element_blank())
+```
+
+### Figure 6h
+
+```{r, fig.width=4, fig.height=4}
+dat.melt %>% 
+  filter(variable == "aSyn_pg.mL") %>% 
+  ggplot(aes(diagnosis, value)) +
+  geom_boxplot(aes(fill = diagnosis)) +
+  theme_bw() + 
+  labs(x = "", y = "aSyn pg/ml", fill = "Diagnosis") +
+  scale_fill_manual(values = pal.major) +
+  stat_compare_means(method = "t.test", comparisons = list(c("CTRL","MSA"), c("MSA","PD"), c("CTRL","PD"))) +
+  guides(fill = "none") +
+  theme(line = element_blank())
+```
+
+### Figure 6i
+
+```{r, fig.width=4, fig.height=4}
+dat.melt %>% 
+  filter(variable %in% c("aSyn_pg.mL","sCD163_ng.mL_CSF")) %>%
+  select(-sex) %>% 
+  mutate(id = rep(seq(63), 2)) %>% 
+  tidyr::pivot_wider(names_from = variable, values_from = value) %>% 
+  ggplot(aes(aSyn_pg.mL, sCD163_ng.mL_CSF)) +
+  geom_point(aes(col = diagnosis)) +
+  theme_bw() +
+  labs(x = "aSyn pg/ml", y = "sCD163, ng/ml", col = "") +
+  geom_smooth(method = MASS::rlm, se = FALSE, color = "black") +
+  stat_poly_eq(aes(label = paste(after_stat(rr.label), after_stat(p.value.label), sep = "*\", \"*")), color = "black") +
+  scale_color_manual(values = pal.major) +
+  theme(line = element_blank())
+```
+
+# Extended Data Figure 1
+
+## Load data
+
+```{r}
+samples <- anno.major %>% 
+  names() %>% 
+  strsplit("!!") %>% 
+  sget(1) %>% 
+  unique()
+
+crm <- qread("crm.qs",
+             nthreads = 10)
+```
+
+## 1a-f
+
+```{r, fig.width=8, fig.height=12}
+mtp <- crm$selectMetrics(ids = c(1:4,6,19))
+
+mtp %>% 
+  lapply(\(met) crm$plotSummaryMetrics(metrics = met, comp.group = "sample", second.comp.group = "group") + 
+           scale_fill_manual(values = pal.major) +
+           labs(x = "") + 
+           theme(axis.text.x = element_blank(),
+                 axis.ticks.x = element_blank())) %>% 
+  plot_grid(plotlist = ., labels = letters[1:6], ncol = 2)
+```
+
+## 1g
+
+```{r, fig.width=6, fig.height=4}
+crm$plotSummaryMetrics(metrics = crm$selectMetrics(ids = 20), comp.group = "sample", second.comp.group = "group") + 
+  scale_fill_manual(values = pal.major) +
+  labs(x = "") + 
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "right")
+```
+
+## 1h
+
+```{r, fig.width=6, fig.height=4}
+crm$plotFilteredCells(doublet.method = "doubletdetection", depth.cutoff = 5e2, size = 0.2, alpha = 0.1) +
+  dotSize(3)
+```
+
+## 1i
+
+```{r, fig.width=8, fig.height=4}
+crm$plotFilteredCells(type = "bar", doublet.method = "doubletdetection", depth.cutoff = 5e2)$data %>%  
+  filter(sample != "MSA_1406") %>%
+  mutate(sample = strsplit(sample, "_") %>% 
+           sget(1)) %$% 
+  split(., sample) %>% 
+  lapply(\(x) split(x, x$filter)) %>% 
+  lapply(lapply, \(df) mutate(df, sample = paste0(sample, seq(nrow(df))))) %>% 
+  lapply(bind_rows) %>% 
+  bind_rows() %>%
+  mutate(sample = factor(sample, levels = c(paste0("CTRL", seq(10)), paste0("MSA", seq(7)), paste0("PD", seq(12))))) %>% 
+  ggplot(aes(sample, pct, fill = filter)) + 
+  geom_bar(stat = "identity") + 
+  geom_text_repel(aes(label = sprintf("%0.2f", round(pct, digits = 2))), 
+                  position = position_stack(vjust = 0.5), 
+                  direction = "y", 
+                  size = 2.5) + 
+  crm$theme + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  labs(x = "", y = "Percentage cells filtered") +
+  theme(legend.position = "bottom")
+```
+
+# Extended Data Figure 2
+
+These figures cannot be reproduced here due to GDPR. Leaving the code for visibility.
+
+## Load data
+
+```{r, eval = F}
+crm <- qread("crm.qs", nthreads = 10)
+```
+
+## 2a
+
+```{r, fig.width=8, fig.height=8, eval = F}
+crm$plotCbCells(samples = crm$metadata$sample %>% as.character() %>% .[. != "MSA_1406"]) +
+  scale_x_discrete(labels = c(paste("CTRL", seq(10)), paste("MSA", seq(7)), paste("PD", seq(12)))) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+## 2b
+
+```{r, fig.width=5, fig.height=4, eval = F}
+crm$plotCbAmbGenes() +
+  theme(line = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.ticks.x = element_line())
+```
+
+# Extended Data Figure 3
+
+## Load and prepare data
+
+```{r}
+con$embedding <- con$embeddings$UMAP
+
+sample.groups <- con$samples %>% 
+  names() %>% 
+  setNames(grepl.replace(., c("CTRL","MSA","PD")), .)
+
+cao <- Cacoa$new(data.object = con, 
+                 sample.groups = ifelse(grepl("CTRL", sample.groups), "CTRL", "DISEASE") %>% 
+                   setNames(names(sample.groups)), 
+                 cell.groups = anno.major, 
+                 ref.level = "CTRL", 
+                 target.level = "DISEASE", 
+                 n.cores = 32)
+
+meta <- read.delim("metadata.tsv", sep = "\t") %>% 
+  filter(sample %in% names(con$samples)) %>% 
+  tibble::column_to_rownames("sample")
+
+cao$estimateExpressionShiftMagnitudes()
+cao$estimateMetadataSeparation(sample.meta = meta, 
+                               space = "expression.shifts")
+```
+
+## 3a
+
+```{r, fig.width = 6, fig.height=4}
+cao$plotSampleDistances(space = "expression.shifts", show.sample.size = T, method = "UMAP")$data %>% 
+  mutate(condition = unname(sample.groups)) %>% 
+  ggplot(aes(x, y, shape = condition, col = condition)) +
+  geom_point(aes(size = n.cells)) + scale_size_continuous(trans = "log10", 
+                                                          range = c(5 * 0.5, 5 * 1.5), name = "Num. cells") +
+  theme_bw() +
+  scale_color_manual(values = pal.major) +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) +
+  labs(x = "", y = "", title = "Condition", shape = "Condition", col = "Condition") +
+  dotSize(3)
+```
+
+## 3b
+
+```{r, fig.width = 6, fig.height=4}
+cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$age %>% setNames(rownames(meta)))$data %>% 
+  mutate(condition = unname(sample.groups)) %>% 
+  ggplot(aes(x, y, shape = condition, col = color)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) +
+  labs(x = "", y = "", title = "Age", color = "Age (y)", shape = "Condition")
+```
+
+## 3c
+
+```{r, fig.width = 6, fig.height=4}
+cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$brain_bank %>% setNames(rownames(meta)))$data %>% 
+  mutate(condition = unname(sample.groups)) %>% 
+  ggplot(aes(x, y, shape = condition, col = color)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) +
+  labs(x = "", y = "", title = "Brain bank", shape = "Condition", color = "Brain bank")
+```
+
+## 3d
+
+```{r, fig.width = 6, fig.height=4}
+cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$extract %>% setNames(rownames(meta)))$data %>% 
+  mutate(condition = unname(sample.groups)) %>% 
+  ggplot(aes(x, y, shape = condition, col = color)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) +
+  labs(x = "", y = "", title = "Extract", shape = "Condition", color = "Extract")
+```
+
+## 3d
+
+```{r, fig.width = 6, fig.height=4}
+cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$flowcell %>% setNames(rownames(meta)))$data %>% 
+  mutate(condition = unname(sample.groups)) %>% 
+  ggplot(aes(x, y, shape = condition, col = color)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) +
+  labs(x = "", y = "", title = "Flowcell", shape = "Condition", color = "Flowcell")
+```
+
+# Extended Data Figure 5
+
+```{r}
+cm.merged <- con$getJointCountMatrix(raw = T) %>% 
+  Matrix::t() %>% 
+  .[, colnames(.) %in% names(anno.major)]
+
+# Create sample-wise annotation
+anno.donor <- con$getDatasetPerCell()[colnames(cm.merged)]
+anno.subtype <- anno.major %>% 
+  .[!is.na(.)] %>% 
+  factor()
+
+idx <- intersect(anno.donor %>% names(), anno.subtype %>% names())
+
+anno.donor %<>% .[idx]
+anno.subtype %<>% .[idx] %>% 
+  {`names<-`(as.character(.), names(.))}
+
+anno.final <- paste0(anno.donor,"!!",anno.subtype) %>% 
+  `names<-`(anno.donor %>% names())
+
+# Create pseudo CM
+cm.pseudo <- sccore::collapseCellsByType(cm.merged %>% Matrix::t(), 
+                                         groups = anno.final, min.cell.count = 1) %>% 
+  t() %>%
+  apply(2, as, "integer")
+
+cm.pseudo %<>% 
+  {. + 1} %>% 
+  DESeq2::DESeqDataSetFromMatrix(., 
+                                 colnames(.) %>% 
+                                   strsplit("_") %>% 
+                                   sget(1) %>% 
+                                   data.frame() %>% 
+                                   `dimnames<-`(list(colnames(cm.pseudo), "group")), 
+                                 design = ~ group) %>% 
+  DESeq2::estimateSizeFactors() %>% 
+  DESeq2::counts(normalized = T)
+```
+
+```{r, fig.width=12, fig.height=24}
+c("TSPO", "COQ2", "MAPT", "FBXO47", "ELOVL7", "EDN1", "GAB1", "TENM2", "RABGEF1", "PLA2G4C", "INPP4B", "ZIC1", "ZIC2", "ZIC3", "ZIC4", "SNCA", "TPPP", "TPPP") %>% 
+  {Map(\(gene, leg) plotGenePseudoBulk(gene, cm.pseudo, leg), gene = ., leg = c(rep(F, 17), T))} %>% 
+  cowplot::plot_grid(plotlist = ., ncol = 3)
+```
+
+# Extended Data Figures 6 & 8
+
+## Load and prepare data
+
+```{r, fig.width=6, fig.height=4}
+cao <- qread("cao_micro_pvm.qs", nthreads = 10)
+
+anno.sort <- anno.micro[rownames(cao$data.object$embedding)]
+anno.sel <- anno.sort[!anno.sort %in% c("MIC_intermediate1", "PVMs")] %>% factor()
+
+emb <- cao$data.object$embedding %>% 
+  `colnames<-`(c("UMAP1","UMAP2")) %>% 
+  .[rownames(.) %in% names(anno.sel), ]
+
+sds_obj <- slingshot(emb, 
+                     anno.sel, 
+                     start.clus = "MIC_steady-state",
+                     stretch = 0
+)
+
+sds <- as.SlingshotDataSet(sds_obj)
+
+pseudotime <- sds_obj@assays@data@listData$pseudotime[, 1]
+```
+
+## 6a
+
+```{r, fig.width=6, fig.height=4}
+plot.df <- cao$data.object$embedding %>% 
+  as.data.frame() %>% 
+  .[rownames(.) %in% names(sds_obj), ] %>% 
+  `colnames<-`(c("UMAP1","UMAP2")) %>% 
+  mutate(., annotation = anno.micro[rownames(.)] %>% as.factor()) %>% 
+  .[complete.cases(.),]
+
+ldata <- getTscanTrajectory(cao$data.object, anno.sel)
+
+cao$data.object$embedding %>% 
+  as.data.frame() %>% 
+  mutate(., unname(anno.micro[rownames(.)])) %>% 
+  setNames(c("UMAP1", "UMAP2", "annotation")) %>% 
+  mutate(., pseudotime = pseudotime[rownames(.)]) %>%
+  ggplot() +
+  geom_point(aes(UMAP1, UMAP2, col = pseudotime), size = 0.3) +
+  geom_line(data = ldata1, aes(UMAP1, UMAP2, group = edge), size = 1) +
+  theme_bw() +
+  theme(line = element_blank()) +
+  scale_color_gradient(low = "navyblue", high = "orange") +
+  labs(col = "Pseudotime", x = "UMAP1", y = "UMAP2")# +
+```
+
+## 6b
+
+Here, we show the code for running the generalized additive mixed model. It takes a significant amount of time to run, we provide data in `pseudotime_micro_l1.qs`.
+
+```{r, eval = F}
+mat <- cao$data.object$getJointCountMatrix() %>%
+  .[match(names(sds_obj), rownames(.)), colSums(.) > 2e2] %>% 
+  .[, !grepl(pattern = "RPL|RPS|MT-", colnames(.))]
+
+mt <- mat %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  {message("Mutating"); mutate(.,
+                               pseudotime = pseudotime[rowname],
+                               condition = cao$data.object$getDatasetPerCell()[rowname] %>%
+                                 as.character() %>%
+                                 strsplit("_") %>%
+                                 sget(1),
+                               sample = strsplit(rowname, "!!") %>%
+                                 sget(1))} %>%
+  .[complete.cases(.), ] %>%
+  {message("Melting"); reshape2::melt(., id.vars = c("rowname", "pseudotime", "condition", "sample"))} %$%
+  {message("Splitting"); split(., variable)}
+```
+
+```{r, eval = F}
+library(gamm4)
+
+res <- mt %>% 
+  sccore::plapply(\(x) {
+    fit_full <- gamm4(data = x, formula = value ~ s(pseudotime, by = factor(condition)), random = ~(1 | sample), REML = F)
+    fit_reduced <- gamm4(data = x, formula = value ~ s(pseudotime), random = ~(1 | sample), REML = F)
+    fit_none <- gamm4(data = x, formula = value ~ 1, random = ~(1 | sample), REML = F)
+    
+    ann <- anova(fit_full$mer, fit_reduced$mer, fit_none$mer)
+    
+    if (any(ann$`Pr(>Chisq)` <= 0.05, na.rm = T)) {
+      residuals <- predict(fit_full$gam, se.fit = T)$fit %>% 
+        unname()
+      
+      r.sq <- c(summary(fit_full$gam)$r.sq, summary(fit_reduced$gam)$r.sq) %>% 
+        setNames(c("full", "reduced"))
+      
+      out <- list(anova = ann,
+                  residuals = residuals,
+                  r.sq = r.sq)
+      
+      return(out)
+    }
+  }, n.cores = 40, mc.preschedule = T, mc.cleanup = T, progress = F) %>%
+  .[!sapply(., is.null)]
+
+qsave(res, "pseudotime_micro_l1.qs")
+```
+
+```{r, fig.height=4, fig.width=6}
+res <- qread("pseudotime_micro_l1.qs")
+
+rsq.pseudo <- res %>% 
+  sapply(\(gene) gene$r.sq[1]) %>% 
+  sort(decreasing = T)
+
+res.filter <- res[names(rsq.pseudo)[seq(50)] %>% strsplit(".", fixed = T) %>% sget(1)]
+
+cm.merged <- cao$data.object$getJointCountMatrix() %>% 
+  .[match(names(pseudotime), rownames(.)), colnames(.) %in% names(res.filter)] %>% 
+  .[rowSums(.) > 0, ]
+
+## Predict smoothend expression 
+pseudotime.both <- pseudotime[rownames(cm.merged)]
+weights.both <- sds_obj@assays@data@listData$weights %>% .[match(names(pseudotime.both), rownames(.)), 1] + 1E-7
+
+scFit <- cm.merged %>% 
+  Matrix::t() %>% 
+  tradeSeq::fitGAM(pseudotime = pseudotime.both, cellWeights = weights.both, verbose = T)
+
+Smooth <- tradeSeq::predictSmooth(scFit, gene = colnames(cm.merged), tidy = F, n=100)
+
+# Average across replicates and scale
+Smooth <- t(scale(t(Smooth)))
+
+# Seriate the results
+Smooth <- Smooth[ seriation::get_order(seriation::seriate(Smooth, method="PCA_angle")), ]
+
+# Create heatmap
+col_fun = circlize::colorRamp2(c(-4, 0, 4), c("navy", "white", "firebrick"))
+
+Heatmap(Smooth, 
+        col = col_fun,
+        cluster_columns=F, 
+        cluster_rows=F, 
+        show_column_names = F, 
+        row_names_gp = grid::gpar(fontsize = 5))
+```
+
+## 8
+
+```{r, fig.height=40, fig.width=20}
+cpc <- pseudotime %>% 
+  names() %>% 
+  strsplit("_") %>% 
+  sget(1) %>% 
+  factor()
+
+res.filter %>% 
+  lget("residuals") %>% 
+  lapply(as.data.frame) %>% 
+  lapply(setNames, "residuals") %>% 
+  lapply(mutate, group = cpc, pseudotime = pseudotime) %>% 
+  data.table::rbindlist(idcol = "gene") %>% 
+  ggplot(aes(pseudotime, residuals, col = group)) +
+  geom_smooth() +
+  theme_bw() +
+  facet_wrap(~gene, ncol = 5, scales = "free")
+```
+
+# Extended Data Figure 9
+
+## 9a
+
+We provide the results output from scHLAcount in `scHLAcount.zip`.
+
+```{r}
+samples <- dir("scHLAcount/rydbirk/") %>% .[grepl(pattern = "_", .)]
+
+cms <- lapply(samples, function(x) {
+  labels <- read.delim(paste0("scHLAcount/rydbirk/",x,"/labels.tsv"), header = F) %>% .[,1]
+  barcodes <- read.delim(paste0("scHLAcount/rydbirk/",x,"/barcodes.tsv"), header = F) %>% 
+    .[,1] %>%
+    sapply(function(y) paste0(x,"one_",y))
+  
+  mtx <- Matrix::readMM(paste0("scHLAcount/rydbirk/",x,"/count_matrix.mtx")) %>% 
+    t() %>%
+    `dimnames<-`(list(barcodes, labels)) %>%
+    .[rowSums(.) > 0,] # Remove cells with no counts
+  
+  tmp <- colnames(mtx) %>%
+    strsplit("*", T) %>%
+    sapply(`[[`, 1)
+  
+  # If more than one allele per HLA type has been detected, sum per HLA type
+  if(any(tmp %>% table() %>% as.numeric() > 1)) {
+    cs <- colSums(mtx)
+    alleles <- unique(tmp)
+    
+    mtx <- lapply(alleles, function(y) mtx[,tmp == y]) %>%
+      lapply(function(y) {
+        if(class(y) == "dgTMatrix") rowSums(y) else y
+      }) %>% 
+      unlist() %>% 
+      Matrix(nrow = nrow(mtx)) %>%
+      `rownames<-`(rownames(mtx))
+  }
+  
+  colnames(mtx) <- unique(tmp)
+  return(mtx)
+}) %>%
+  setNames(samples)
+```
+
+Calculations
+
+```{r}
+# Cell-wise
+cell.counts <- sapply(cms, rowSums) %>% 
+  unname() %>% 
+  unlist() %>% 
+  `names<-`(., gsub("one_","!!",names(.)))
+
+depth <- getConosDepth(con) %>%
+  .[match(names(cell.counts), names(.))] %>%
+  {data.frame(cell = names(.),
+              sample = names(.) %>% strsplit("!!", T) %>% sapply(`[[`, 1),
+              depth = unname(.))}
+
+depth[is.na(depth)] <- 0
+
+cell.group <- grepl.replace(names(cell.counts), patterns = c("CTRL","PD","MSA")) %>% as.factor()
+
+mhc1.raw <- sapply(cms, function(x) {
+  tmp <- x[,colnames(x) %in% c("A","B","C")]
+  if(class(tmp) != "numeric") rowSums(tmp) else tmp
+}) %>% 
+  unname() %>% 
+  unlist() %>% 
+  `names<-`(., gsub("one_","!!",names(.)))
+
+mhc2.raw <- sapply(cms, function(x) {
+  tmp <- x[,!colnames(x) %in% c("A","B","C")]
+  if(class(tmp) != "numeric") rowSums(tmp) else tmp
+}) %>% 
+  unname() %>% 
+  unlist() %>% 
+  `names<-`(., gsub("one_","!!",names(.)))
+
+cell.df <- data.frame(group = cell.group,
+                      counts = cell.counts,
+                      mhc1 = mhc1.raw,
+                      mhc2 = mhc2.raw,
+                      depth = depth$depth) %>%
+  mutate(., anno = anno.major[match(rownames(.), names(anno.major))],
+         sample = rownames(.) %>% sapply(strsplit, "!!", T) %>% sapply(`[[`, 1)) %>%
+  mutate(type = grepl.replace(anno %>% as.character(), levels(anno), c("Brain","Brain","Brain","Peripheral","Peripheral","Peripheral","Brain","Brain","Brain","Brain"))) %>%
+  `rownames<-`(names(cell.counts)) %>%
+  filter(!is.na(anno)) 
+```
+
+Load Smajic data
+
+```{r}
+samples <- dir("scHLAcount/smajic") %>% .[grepl(pattern = "SRR", .)]
+
+cms <- lapply(samples, function(x) {
+  labels <- read.delim(paste0("scHLAcount/smajic/",x,"/labels.tsv"), header = F) %>% .[,1]
+  barcodes <- read.delim(paste0("scHLAcount/smajic/",x,"/barcodes.tsv"), header = F) %>% 
+    .[,1] %>%
+    sapply(function(y) paste0(x,"_",y,"_1"))
+  mtx <- Matrix::readMM(paste0("scHLAcount/smajic/",x,"/count_matrix.mtx")) %>% 
+    t() %>%
+    `dimnames<-`(list(barcodes, labels)) %>%
+    .[rowSums(.) > 0,] # Remove cells with no counts
+  
+  tmp <- colnames(mtx) %>%
+    strsplit("*", T) %>%
+    sapply(`[[`, 1)
+  
+  # If more than one allele per HLA type has been detected, sum per HLA type
+  if(any(tmp %>% table() %>% as.numeric() > 1)) {
+    cs <- colSums(mtx)
+    alleles <- unique(tmp)
+    
+    mtx <- lapply(alleles, function(y) mtx[,tmp == y]) %>%
+      lapply(function(y) {
+        if(class(y) == "dgTMatrix") rowSums(y) else y
+      }) %>% 
+      unlist() %>% 
+      Matrix(nrow = nrow(mtx)) %>%
+      `rownames<-`(rownames(mtx))
+  }
+  
+  colnames(mtx) <- unique(tmp)
+  return(mtx)
+}) %>%
+  setNames(samples)
+
+# Correct naming
+name.df <- data.frame(samples = samples, ids = c(rep("PD",6) %>% mapply(function(x,y) paste0(x,y), x = ., y = c(1,1,2:5)),
+                                                 rep("CTRL",6) %>% mapply(function(x,y) paste0(x,y), x = ., y = 1:6)))
+
+anno <- readRDS(paste0("scHLAcount/smajic/anno.sma.rds")) %>%
+  setNames(., names(.) %>% 
+             strsplit("_", T) %>% 
+             lapply(function(x) {
+               if(grepl("C", x[[1]])) x[[1]] %<>% gsub("C","CTRL", .)
+               return(x)
+             }) %>%
+             sapply(function(x) paste0(x[[1]],"_",x[[2]])))
+
+cms <- 1:12 %>% 
+  lapply(function(x) {
+    rnames <- cms[[x]] %>%
+      rownames() %>%
+      names() %>%
+      sapply(function(y) paste0(name.df[x,2],"_",y)) %>%
+      unname()
+    
+    rownames(cms[[x]]) <- rnames
+    return(cms[[x]])
+  }) %>%
+  setNames(names(cms))
+```
+
+Calculations
+
+```{r}
+cell.df.rydbirk <- cell.df
+
+# Cell-wise
+cell.counts <- sapply(cms, rowSums) %>% 
+  unname() %>% 
+  unlist()
+
+rem <- cell.counts %>%
+  names() %>%
+  table() %>%
+  .[. > 1] %>%
+  names()
+
+cell.counts %<>% .[!names(.) %in% rem]
+
+cell.group <- grepl.replace(names(cell.counts), patterns = c("CTRL","PD")) %>% as.factor()
+
+mhc1.raw <- sapply(cms, function(x) {
+  tmp <- x[,colnames(x) %in% c("A","B","C")]
+  if(class(tmp) != "numeric") rowSums(tmp) else tmp
+}) %>% 
+  unname() %>% 
+  unlist() %>%
+  .[!names(.) %in% rem]
+
+mhc2.raw <- sapply(cms, function(x) {
+  tmp <- x[,!colnames(x) %in% c("A","B","C")]
+  if(class(tmp) != "numeric") rowSums(tmp) else tmp
+}) %>% 
+  unname() %>% 
+  unlist() %>%
+  .[!names(.) %in% rem]
+
+cell.df <- data.frame(group = cell.group,
+                      counts = cell.counts,
+                      mhc1 = mhc1.raw,
+                      mhc2 = mhc2.raw) %>%
+  mutate(., anno = anno[match(rownames(.), names(anno))],
+         sample = rownames(.) %>% sapply(strsplit, "_", T) %>% sapply(`[[`, 1)) %>%
+  `rownames<-`(names(cell.counts)) %>%
+  filter(!is.na(anno))
+```
+
+Integrate with our data and plot
+
+```{r, fig.width = 8, fig.height = 4}
+cell.df.int <- rbind(cell.df.rydbirk %>% 
+                       select(-c("depth","type")) %>%
+                       mutate(origin = "Rydbirk"),
+                     cell.df %>% 
+                       mutate(anno = anno %>% factor(labels = c("Astrocytes","Exc. neurons","Inh. neurons","Endothelial","Eppendymal","Exc. neurons","Inh. neurons","Inh. neurons","Microglia","Oligodendrocytes","OPCs","Pericytes")),
+                              origin = "Smajic")) %>%
+  filter(! anno %in% c("Blood_immune","Endothelial","Eppendymal","Mural","Pericytes","Pericytes/endothelial","Immune")) %>%
+  filter(!is.na(anno)) %>% 
+  mutate(anno = anno %>% factor(),
+         origin = origin %>% factor(),
+         anno = anno %>% unname() %>% factor(),
+         sample = sample %>% unname())
+
+cell.anno.df <-
+  cell.df.int %>%
+  group_by(anno, sample, group, origin) %>%
+  summarise(mhc1 = mean(mhc1),
+            mhc2 = mean(mhc2),
+            counts = mean(counts),
+            cells = length(sample)) %>%
+  as.data.frame() %>% 
+  select(-cells, -counts, -sample)
+
+p.text1 <- data.frame(signif = c("n.s.", "n.s.", "n.s.", "n.s.", "n.s.", "0.040", "0.032", "n.s."), 
+                      mhc1 = 4.5,
+                      anno = levels(cell.anno.df$anno))
+
+p.text2 <- data.frame(signif = c("0.00057"), 
+                      mhc2 = 8.5,
+                      anno = "             Microglia")
+
+cowplot::plot_grid(plotlist = list(
+  ggplot(cell.anno.df, 
+         aes(anno, 
+             mhc1)) +
+    geom_boxplot(outlier.shape = NA, 
+                 aes(fill = group)) +
+    geom_point(position = position_jitterdodge(jitter.width = 0.2), 
+               aes(fill = group, 
+                   col = origin, 
+                   shape = group),
+               size = 2) +
+    scale_color_manual(values = c("black",
+                                  "grey50")) +
+    labs(x = "", 
+         y = "Mean counts per sample", 
+         title = "MHC-I counts", 
+         fill = "", 
+         col = "", 
+         shape = " ") +
+    geom_text(data = p.text1, aes(label = signif)) +
+    theme_bw() +
+    scale_fill_manual(values = pal.major) +
+    theme(legend.position = "none", 
+          axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+          line = element_blank()),
+  ggplot(cell.anno.df %>% filter(anno == "Microglia") %>% mutate(anno = "             Microglia"), aes(anno, mhc2)) +
+    geom_boxplot(outlier.shape = NA, aes(fill = group)) +
+    geom_point(position = position_jitterdodge(jitter.width = 0.2), aes(fill = group, col = origin, shape = group), size = 2) +
+    scale_color_manual(values = c("black","grey50")) +
+    labs(x = "", y = "", title = "MHC-II counts", fill = "", col = "", shape = " ") +
+    geom_text(data = p.text2, aes(label = signif)) +
+    theme_bw() +
+    scale_fill_manual(values = pal.major) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+          line = element_blank())
+), ncol = 2, rel_widths = c(2,0.9))
+```
+
+Kruskal-Wallis, asses differences per cell type
+
+```{r}
+cell.anno.df %>% 
+  group_by(anno) %>% 
+  kruskal_test(mhc1 ~ group) %>% 
+  data.frame()
+
+cell.anno.df %>% 
+  filter(anno == "Microglia") %>% 
+  group_by(anno) %>% 
+  kruskal_test(mhc2 ~ group) %>% 
+  data.frame()
+```
+
+Wilcoxon, assess differences between our data and Smajic per condition per cell type
+
+```{r}
+cell.anno.df %>% 
+  filter(group != "MSA", 
+         !anno %in% c("MSN","PVMs")) %>%
+  group_by(anno, group) %>% 
+  wilcox_test(mhc1 ~ origin) %>% 
+  data.frame()
+
+cell.anno.df %>% 
+  filter(group != "MSA", 
+         anno == "Microglia") %>%
+  group_by(anno, group) %>% 
+  wilcox_test(mhc2 ~ origin) %>% 
+  data.frame()
+```
+
+## 9b
+
+We provide a curated list with MHC and cytokine genes. Please note, the order of clusters may change.
+
+```{r, fig.width=4, fig.height=4}
+dat <- read.table("MHC_cytokines_curated.tsv", header = T, sep = "\t")
+
+cm.merged <- con$getJointCountMatrix(raw = T) %>% 
+  Matrix::t() %>% 
+  .[, colnames(.) %in% names(anno.major)] %>% 
+  .[rownames(.) %in% (dat$name[dat$class == "cytokine"] %>% gsub("-","",.)), ] %>% 
+  .[rowSums(.) > 0,]
+
+# Create sample-wise annotation
+anno.donor <- con$getDatasetPerCell()[colnames(cm.merged)]
+anno.subtype <- anno.major %>% 
+  .[!is.na(.) & (. %in% c("Microglia", "PVMs"))] %>% 
+  factor()
+
+idx <- intersect(anno.donor %>% names(), anno.subtype %>% names())
+
+anno.donor %<>% .[idx]
+anno.subtype %<>% .[idx] %>% 
+  {`names<-`(as.character(.), names(.))}
+
+anno.final <- paste0(anno.donor,"!!",anno.subtype) %>% 
+  `names<-`(anno.donor %>% names())
+
+# Create pseudo CM
+cm.pseudo <- sccore::collapseCellsByType(cm.merged %>% Matrix::t(), 
+                                         groups = anno.final, min.cell.count = 1) %>% 
+  t() %>%
+  apply(2, as, "integer")
+
+cm.pseudo %<>% 
+  {. + 1} %>% 
+  DESeq2::DESeqDataSetFromMatrix(., 
+                                 colnames(.) %>% 
+                                   strsplit("_") %>% 
+                                   sget(1) %>% 
+                                   data.frame() %>% 
+                                   `dimnames<-`(list(colnames(cm.pseudo), "group")), 
+                                 design = ~ group) %>% 
+  DESeq2::estimateSizeFactors() %>% 
+  DESeq2::counts(normalized = T)
+
+cm.pseudo %<>% 
+  Matrix::t() %>% 
+  scale() %>%
+  Matrix::t()
+
+ord <- cm.pseudo %>% 
+  colnames() %>% 
+  {data.frame(id = .)} %>% 
+  mutate(., 
+         ct = strsplit(id, "!!") %>% 
+           sget(2),
+         condition = strsplit(id, "!!|_") %>% 
+           sget(1)) %>% 
+  arrange(ct, condition) %>% 
+  pull(id)
+
+cm.pseudo %<>% 
+  .[, match(ord, colnames(.))]
+
+cm.pseudo %<>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = "gene") %>% 
+  reshape2::melt(id.vars = c("gene")) %>% 
+  mutate(variable = as.character(variable),
+         condition = strsplit(variable, "!!|_") %>% 
+           sget(1),
+         ct = strsplit(variable, "!!") %>% 
+           sget(2)) %>% 
+  group_by(condition, ct, gene) %>% 
+  summarize(m = mean(value)) %>% 
+  ungroup() %>% 
+  mutate(variable = paste(condition, ct, sep = "!!")) %>% 
+  select(-condition, -ct) %>% 
+  reshape2::dcast(gene ~ variable, value.var = "m") %>% 
+  tibble::column_to_rownames(var = "gene")
+
+tmp <- cm.pseudo %>% 
+  colnames() %>% 
+  strsplit("_|!!")
+
+clusters <- tmp %>%
+  sget(2)
+
+condition <- tmp %>% 
+  sget(1)
+
+ha <- ComplexHeatmap::HeatmapAnnotation(Annotation = clusters,
+                                        Condition = condition,
+                                        col = list(Annotation = c("Microglia" = unname(pal.major["Microglia"]), 
+                                                                  "PVMs" = unname(pal.major["PVMs"])),
+                                                   Condition = c("CTRL" = unname(pal.major["CTRL"]), 
+                                                                 "MSA" = unname(pal.major["MSA"]),
+                                                                 "PD" = unname(pal.major["PD"]))
+                                        ))
+
+ComplexHeatmap::Heatmap(cm.pseudo,
+                        name = "Expression", 
+                        show_column_names = F, 
+                        show_row_names = T, 
+                        cluster_columns = F, 
+                        show_column_dend = F, 
+                        cluster_rows = T, 
+                        top_annotation = ha, 
+                        show_row_dend = F, 
+                        column_split = colnames(cm.pseudo) %>% strsplit("!!|_") %>% sget(2) %>% unname() %>% factor(),
+                        col=circlize::colorRamp2(c(-1, 1.2), c("white", "firebrick")),
+                        row_km = 4)
+```
+
+# Extended Data Figure 10
+
+## 10c
+
+```{r, fig.width=14, fig.height=6}
+c("FOSL2", "TCF4", "STAT1", "NR3C1", "ETV7", "THRB", "BPTF", "RELB", "CEBPD", "HIF1A", "ELF1", "CREM", "ELF2", "ZNF44", "CHD1", "POU2F1", "GTF2IRD1", "NFIA", "NFE2L2", "FOXP1", "FOXO3") %>% 
+  clusterProfiler::enrichGO("org.Hs.eg.db", "SYMBOL", "BP") %>% 
+  enrichplot::pairwise_termsim() %>% 
+  enrichplot::treeplot() +
+  scale_fill_manual(values = brewer.pal(6, "Greys")[-1])
+```
+
+# Extended Data Figure 11
+
+## 11a
+
+We provide the results from scDRS based on Nalls *et al.* GWAS summary stats.
+
+```{r, fig.width=6, fig.height=4}
+dat.scores <- qread("gwas/nalls/PD.full_score.qs")
+
+# Load downstream analyses for cell types versus trait
+dat.ct <- read.delim("gwas/nalls/downstream_celltype.tsv", header = F, sep = "\t") %$%  
+  strsplit(V1, " ") %>% 
+  unlist() %>% 
+  gsub("\\", "", ., fixed = T) %>% 
+  gsub("\n", "", ., fixed = T) %>% 
+  .[!sapply(., \(x) x == "")] %>% 
+  .[c(1:5,69:72, # Header
+      8:12,75:78, # Astro
+      15:19,81:84, # EN
+      21:25,86:89, # Immune
+      28:32,92:95, # IN
+      34:38,97:100, # MSN
+      40:44,102:105, # MIC
+      46:50,107:110, # OPCs
+      52:56,112:115, # OL
+      58:62,117:120, # PVMs
+      64:68,122:125 # Peri
+  )]
+
+dat.sign <- dat.ct %>%
+  split(seq(9)) %>% 
+  bind_rows() %>% 
+  {`colnames<-`(.[-1, ], .[1, ])} %>% 
+  as.data.frame()
+
+dat.sign %<>%  mutate(group = c("Astrocytes",
+                                "Exc. neurons",
+                                "Immune",
+                                "Inh. neurons",
+                                "MSN",
+                                "Microglia",
+                                "OPCs",
+                                "Oligodendrocytes",
+                                "PVMs",
+                                "Pericytes/endothelial"))
+
+dat.sign %<>% 
+  filter(!group == "Unknown") %>% 
+  mutate(p.adj = p.adjust(assoc_mcp, method = "fdr"),
+         hetero.adj = p.adjust(hetero_mcp, method = "fdr")) %>% 
+  mutate(assoc_sign = sapply(assoc_mcp, \(x) if (x <= 0.001) "***" else if (x <= 0.01 && x > 0.001) "**" else if (x <= 0.05 && x > 0.01) "*" else ""),
+         hetero_sign = sapply(hetero_mcp, \(x) if (x <= 0.001) "###" else if (x <= 0.01 && x > 0.001) "##" else if (x <= 0.05 && x > 0.01) "#" else " ")) %>% 
+  mutate(sign = paste0(assoc_sign,",",hetero_sign) %>% gsub(", ", "", .)) %>% 
+  select(group, sign) %>% 
+  dplyr::rename(type = group)
+
+data.frame(cell = dat.scores$X,
+           score = dat.scores$norm_score,
+           type = anno.major[match(dat.scores$X,
+                                   names(anno.major))]) %>%
+  group_by(type) %>%
+  summarize(m = median(score)) %>%
+  filter(!is.na(type)) %>% 
+  mutate(type = as.character(type)) %$% 
+  arrange(., desc(m)) %>%
+  mutate(type = factor(type, levels = type), sign = dat.sign$sign[match(type %>% levels, dat.sign$type)]) %>%
+  ggplot(aes(type, m, fill = type)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = sign), vjust = -0.5) +
+  theme_bw() + 
+  labs(y = "Mean score", x = "", title = "scDRS mean scores and associations") +
+  guides(fill = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        line = element_blank()) +
+  ylim(c(-0.6, 2)) +
+  scale_fill_manual(values = pal.major) +
+  geom_hline(yintercept = 0)
+```
+
+## 11b
+
+```{r, fig.height=4, fig.width=3.5}
+dat.ct <- read.delim("gwas/nalls/downstream_celltype_microglia.tsv", header = F, sep = "\t") %$%  
+  strsplit(V1, " ") %>% 
+  unlist() %>% 
+  gsub("\\", "", ., fixed = T) %>% 
+  gsub("\n", "", ., fixed = T) %>% 
+  gsub("group", "", .) %>% 
+  .[!sapply(., \(x) x == "")] %>% 
+  {c("group", .[seq(35)])} %>% 
+  matrix(ncol = 6, byrow = T) %>% 
+  as.data.frame() %>% 
+  `colnames<-`(., .[1, ]) %>% 
+  .[-1, ]
+
+dat.sign <- 
+  dat.ct %>% 
+  filter(!group == "Unknown") %>% 
+  mutate(p.adj = p.adjust(assoc_mcp, method = "fdr"),
+         hetero.adj = p.adjust(hetero_mcp, method = "fdr")) %>% 
+  mutate(assoc_sign = sapply(assoc_mcp, \(x) if (x <= 0.001) "***" else if (x <= 0.01 && x > 0.001) "**" else if (x <= 0.05 && x > 0.01) "*" else ""),
+         hetero_sign = sapply(hetero_mcp, \(x) if (x <= 0.001) "###" else if (x <= 0.01 && x > 0.001) "##" else if (x <= 0.05 && x > 0.01) "#" else " ")) %>% 
+  mutate(sign = paste0(assoc_sign,",",hetero_sign) %>% gsub(", ", "", .)) %>% 
+  select(group, sign) %>% 
+  dplyr::rename(type = group)
+
+data.frame(cell = dat.scores$X %>% gsub("one_", "!!", .),
+           score = dat.scores$norm_score,
+           type = anno.major[match(dat.scores$X,
+                                   names(anno.major))]) %>%
+  filter(cell %in% names(anno.micro)) %>% 
+  mutate(type = factor(anno.micro[.$cell])) %>% 
+  group_by(type) %>%
+  summarize(m = mean(score)) %>%
+  filter(!is.na(type)) %>% 
+  mutate(type = as.character(type)) %>% 
+  arrange(desc(m)) %>% 
+  mutate(type = factor(type, levels = type), sign = dat.sign$sign[match(type %>% levels, dat.sign$type)]) %>%
+  mutate(type = factor(type, levels = type)) %>% 
+  ggplot(aes(type, m, fill = type)) + 
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = sign), vjust = -0.5, nudge_y = -0.05) +
+  theme_bw() + 
+  theme(line = element_blank()) +
+  labs(y = "Mean score", x = "", title = "scDRS for microglia") +
+  guides(fill = "none") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  ylim(c(0, 2)) +
+  scale_fill_manual(values = pal.major)
+```
+
+## 11c
+
+We provide the results from scDRS based on Chia *et al.* GWAS summary stats.
+
+```{r, fig.width=6, fig.height=4}
+dat.scores <- qread("gwas/chia/MSA.full_score.qs")
+
+# Load downstream analyses for cell types versus trait
+dat.ct <- read.delim("gwas/chia/downstream_celltype.tsv", header = F, sep = "\t") %$%  
+  strsplit(V1, " ") %>% 
+  unlist() %>% 
+  gsub("\\", "", ., fixed = T) %>% 
+  gsub("\n", "", ., fixed = T) %>% 
+  .[!sapply(., \(x) x == "")] %>% 
+  .[c(1:5,69:72, # Header
+      8:12,75:78, # Astro
+      15:19,81:84, # EN
+      21:25,86:89, # Immune
+      28:32,92:95, # IN
+      34:38,97:100, # MSN
+      40:44,102:105, # MIC
+      46:50,107:110, # OPCs
+      52:56,112:115, # OL
+      58:62,117:120, # PVMs
+      64:68,122:125 # Peri
+  )]
+
+dat.sign <- dat.ct %>%
+  split(seq(9)) %>% 
+  bind_rows() %>% 
+  {`colnames<-`(.[-1, ], .[1, ])} %>% 
+  as.data.frame()
+
+dat.sign %<>%  mutate(group = c("Astrocytes",
+                                "Exc. neurons",
+                                "Immune",
+                                "Inh. neurons",
+                                "MSN",
+                                "Microglia",
+                                "OPCs",
+                                "Oligodendrocytes",
+                                "PVMs",
+                                "Pericytes/endothelial"))
+
+dat.sign %<>% 
+  filter(!group == "Unknown") %>% 
+  mutate(assoc_sign = sapply(assoc_mcp, \(x) if (x <= 0.001) "***" else if (x <= 0.01 && x > 0.001) "**" else if (x <= 0.05 && x > 0.01) "*" else ""),
+         hetero_sign = sapply(hetero_mcp, \(x) if (x <= 0.001) "###" else if (x <= 0.01 && x > 0.001) "##" else if (x <= 0.05 && x > 0.01) "#" else " ")) %>% 
+  mutate(sign = paste0(assoc_sign,",",hetero_sign) %>% gsub(",", "", .)) %>% 
+  select(group, sign) %>% 
+  dplyr::rename(type = group)
+
+data.frame(cell = dat.scores$X,
+           score = dat.scores$norm_score,
+           type = anno.major[match(dat.scores$X,
+                                   names(anno.major))]) %>%
+  group_by(type) %>%
+  summarize(m = median(score)) %>%
+  filter(!is.na(type)) %>% 
+  mutate(type = as.character(type)) %$% 
+  arrange(., desc(m)) %>%
+  mutate(type = factor(type, levels = type), sign = dat.sign$sign[match(type %>% levels, dat.sign$type)]) %>%
+  ggplot(aes(type, m, fill = type)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = sign), vjust = 1.5) +
+  theme_bw() + 
+  labs(y = "Mean score", x = "", title = "scDRS mean scores and associations") +
+  guides(fill = "none") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        line = element_blank()) +
+  ylim(c(-0.5, 0.5)) +
+  scale_fill_manual(values = pal.major) +
+  geom_hline(yintercept = 0)
+```
+
+# Extended Data Figure 12
+
+All subfigures were made in GraphPad Prism. Data are available in `Phagocytosis_assay_triplicates_raw_data_HH.tsv` (Copenhagen experiment) or `HOUSTON.tsv` (Houston experiment).
+
+# Session info
+
+Time to knit
+
+```{r}
+Sys.time() - tt
+```
+
+```{r}
+sessionInfo()
+```
