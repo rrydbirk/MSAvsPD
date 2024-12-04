@@ -1,7 +1,7 @@
 ---
 title: "Figures_MSA-PD"
 author: "Rasmus Rydbirk"
-date: "03-12-2024"
+date: "04-12-2024"
 output: 
   html_document:
     toc: yes
@@ -59,8 +59,6 @@ anno <- qread("anno_major.qs")
 
 anno.major <- anno[!names(anno) %in% names(anno.neurons.major) & !anno == "Neurons"] %>% 
   {factor(c(., anno.neurons.major))}
-
-# qsave(anno.major, "/work/msa/03_annotations/anno_0final.qs")
 
 pal.major <- brewer.pal(n = 10, "Set1") %>% 
   c("lightblue3") %>% 
@@ -720,7 +718,7 @@ cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distan
 ## Load data
 
 ```{r}
-con.glia <- qread("/work/msa/02_data/conos/con_oligo_astro_opc.qs", nthreads = 10)
+con.glia <- qread("con_oligo_astro_opc.qs", nthreads = 10)
 
 cao_msa <- qread("cao_oligo_astro_opc_msa.qs", nthreads = 10)
 cao_pd <- qread("cao_oligo_astro_opc_pd.qs", nthreads = 10)
@@ -2652,7 +2650,7 @@ c("FOSL2", "TCF4", "STAT1", "NR3C1", "ETV7", "THRB", "BPTF", "RELB", "CEBPD", "H
 
 ## 11a
 
-We provide the results from scDRS based on Nalls *et al.* GWAS summary stats.
+We provide the results from scDRS based on Nalls *et al.* GWAS summary stats. For calculation of these, see `scDRS_PD.ipynb`.
 
 ```{r, fig.width=6, fig.height=4}
 dat.scores <- qread("gwas/nalls/PD.full_score.qs")
@@ -2781,7 +2779,7 @@ data.frame(cell = dat.scores$X %>% gsub("one_", "!!", .),
 
 ## 11c
 
-We provide the results from scDRS based on Chia *et al.* GWAS summary stats.
+We provide the results from scDRS based on Chia *et al.* GWAS summary stats. For calculation of these, see `scDRS_MSA.ipynb`.
 
 ```{r, fig.width=6, fig.height=4}
 dat.scores <- qread("gwas/chia/MSA.full_score.qs")
