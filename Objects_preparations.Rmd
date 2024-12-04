@@ -1,0 +1,839 @@
+---
+title: "Objects preparations"
+author: "Rasmus Rydbirk"
+date: "2024-11-29"
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+---
+
+# Setup
+
+```{r setup, message=FALSE}
+library(qs)
+library(cacoa)
+library(conos)
+library(magrittr)
+
+anno.major <- qread("anno_major.qs")
+```
+
+# All cells
+
+## Conos object
+
+The easiest way to extract the list with raw count matrices is to extract it from the Conos object that we provide for all cells. We do this first and then preprocess.
+
+```{r}
+con.major <- qread("con_major.qs", nthreads = 10)
+
+cms.preprocessed <- con.major$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(basicP2proc, make.geneknn = F, get.tsne = F, get.largevis = F, n.cores = 32)
+```
+
+Then, we can re-create the Conos object. Please note, we provide an additional embedding in the prepared object that you'll lose if you save this object. Also, the embedding may not be exactly the same.
+
+After the next step, we use the major object to create objects for subpopulations.
+
+```{r, eval = F}
+con.major <- cms.preprocessed %>%  
+  Conos$new(n.cores = 32)
+
+con.major$buildGraph()
+con.major$findCommunities(min.group.size = 25)
+con.major$embedGraph(method = "UMAP")
+
+qsave("con_major.qs", nthreads = 10)
+```
+
+## Export to Python
+
+```{r}
+annotation <- qread("anno_major.qs")
+
+con.major$samples %>% 
+  lapply(conos:::getGenes) %>% 
+  Reduce(union, .) %>% 
+  .[grep("MT-|RPS|RPL", .)] %>% 
+  prepareObjectsForPython(con.major, 
+                          annotation,
+                          "",
+                          "all_cells",
+                          "UMAP", 
+                          genes.to.omit = .)
+```
+
+Subtypes
+
+```{r}
+anno.sub <- c("anno_astro.qs",
+              "anno_micro_pvm.qs",
+              "anno_neurons.qs",
+              "anno_oligo.qs",
+              "anno_opc.qs",
+              "anno_pericytes.qs") %>% 
+  lapply(qread) %>% 
+  Reduce(c, .) %>% 
+  .[!is.na(.)] %>%
+  factor() %>% 
+  renameAnnotation("Reactive_astrocytes","AS_reactive") %>% 
+  renameAnnotation("Homeostatic_astrocytes","AS_homeostatic") %>% 
+  renameAnnotation("Steady-state","MIC_steady-state") %>% 
+  renameAnnotation("Intermediate1","MIC_intermediate1") %>% 
+  renameAnnotation("Intermediate2","MIC_intermediate2") %>% 
+  renameAnnotation("Activated","MIC_activated") %>% 
+  renameAnnotation("Homeostatic_LINC01608","OL_LINC01608") %>% 
+  renameAnnotation("Homeostatic_SLC5A11","OL_SLC5A11") %>% 
+  renameAnnotation("Reactive_SCGZ","OL_SGCZ")
+  
+anno.df <- anno.sub %>% {
+  data.frame(cellid = names(.), annotation = unname(.))
+}
+
+write.table(anno.df, 
+            "all_cells_subtypes.annotation",
+            sep = ",",
+            dec = ".", 
+            row.names = F,
+            col.names = F)
+```
+
+## Cacoa objects
+
+Create objects
+
+CTRL vs. MSA
+
+```{r, eval = F}
+con_msa <- Conos$new(con$samples[!grepl("PD",names(con$samples))])
+
+sample.groups <- con_msa$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "MSA"), .)
+
+con_msa$buildGraph()
+con_msa$findCommunities()
+con_msa$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_msa, sample.groups, anno.major, ref.level = "CTRL", target.level = "MSA", n.cores = 50)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes(cell.groups = anno.major[!anno.major %in% c("Immune","Pericytes/endothelial")] %>% factor(), min.cells.per.sample = 3)
+
+qsave(cao, "cao_major_msa.qs", nthreads = 10)
+```
+
+CTRL vs. PD
+
+```{r, eval = F}
+con_pd <- Conos$new(con$samples[!grepl("MSA",names(con$samples))])
+
+sample.groups <- con_pd$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "PD"), .)
+
+con_pd$buildGraph()
+con_pd$findCommunities()
+con_pd$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_pd, sample.groups, anno.major, ref.level = "CTRL", target.level = "PD", n.cores = 50)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes(cell.groups = anno.major[!anno.major %in% c("Immune","Pericytes/endothelial")] %>% factor(), min.cells.per.sample = 3)
+
+qsave(cao, "cao_major_pd.qs", nthreads = 10)
+```
+
+PD vs. MSA
+
+```{r, eval = F}
+con_dis <- Conos$new(con$samples[!grepl("CTRL",names(con$samples))])
+
+sample.groups <- con_dis$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("MSA", .), "MSA", "PD"), .)
+
+con_dis$buildGraph()
+con_dis$findCommunities()
+con_dis$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_dis, sample.groups, anno.major, ref.level = "PD", target.level = "MSA", n.cores = 50)
+
+cao$estimateCellLoadings()
+cao_dis$estimateExpressionShiftMagnitudes(cell.groups = anno.major[!anno.major %in% c("Immune","Pericytes/endothelial")] %>% factor(), min.cells.per.sample = 3)
+
+qsave(cao, "cao_major_dis.qs", nthreads = 10)
+```
+
+## Create count matrices per cell type
+
+At this point, we can create lists of count matrices per cell type. It's not strictly necessary, but it was the approach we used.
+
+```{r}
+cell.ids <- anno.major %>%
+  levels() %>% 
+  lapply(\(ct) anno.major[anno.major == ct] %>% 
+           names()) %>% 
+  setNames(anno.major %>% levels())
+```
+
+```{r}
+cms.all <- con.major$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts")
+
+cms.per.ct <- cell.ids %>% 
+  plapply(\(ct) {
+    cms.all %>% 
+      lapply(\(cm) cm[,colnames(cm) %in% ct])
+  }, n.cores = 8) %>% 
+  setNames(cell.ids %>% names())
+```
+
+# Neurons
+
+## Conos
+
+Remove samples with less than 25 cells
+
+```{r}
+cms <- cms.per.ct[["Neurons"]] %>% 
+  .[sapply(., ncol) > 25]
+```
+
+```{r}
+cms.preprocessed <- lapply(cms, 
+                           basicP2proc, 
+                           n.cores = 50, 
+                           min.cells.per.gene = 10, 
+                           get.largevis = FALSE, 
+                           get.tsne = FALSE, 
+                           make.geneknn = FALSE,
+                           nPcs = 10, 
+                           k = 20)
+
+con <- Conos$new(cms.preprocessed, 
+                 n.cores = 32, 
+                 verbose = TRUE)
+
+con$buildGraph(ncomps = 20)
+con$findCommunities()
+con$embedGraph(method = "UMAP")
+```
+
+## Cacoa
+
+CTRL vs combined disease
+
+```{r}
+sample.groups <- con$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "DISEASE"), .)
+
+anno <- qread("anno_neurons.qs")
+
+cao <- Cacoa$new(con, sample.groups, anno, ref.level = "CTRL", target.level = "DISEASE", n.cores = 50)
+
+qsave(cao, "cao_neurons.qs", nthreads = 10)
+```
+
+CTRL vs MSA
+
+```{r}
+con_msa <- Conos$new(con$samples[!grepl("PD",names(con$samples))])
+
+sample.groups <- con_msa$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "MSA"), .)
+
+con_msa$buildGraph()
+con_msa$findCommunities()
+con_msa$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_msa, sample.groups, anno, ref.level = "CTRL", target.level = "MSA", n.cores = 50)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes(min.cells.per.sample = 1)
+
+qsave(cao, "cao_neurons_msa.qs", nthreads = 10)
+```
+
+CTRL vs PD
+
+```{r, eval = F}
+con_pd <- Conos$new(con$samples[!grepl("MSA",names(con$samples))])
+
+sample.groups <- con_pd$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "PD"), .)
+
+con_pd$buildGraph()
+con_pd$findCommunities()
+con_pd$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_pd, sample.groups, anno, ref.level = "CTRL", target.level = "PD", n.cores = 50)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes(min.cells.per.sample = 1)
+
+qsave(cao, "cao_neurons_pd.qs", nthreads = 10)
+```
+
+PD vs MSA
+
+```{r, eval = F}
+con_dis <- Conos$new(con$samples[!grepl("CTRL",names(con$samples))])
+
+sample.groups <- con_dis$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("MSA", .), "MSA", "PD"), .)
+
+con_dis$buildGraph()
+con_dis$findCommunities()
+con_dis$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_dis, sample.groups, anno, ref.level = "PD", target.level = "MSA", n.cores = 50)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes(min.cells.per.sample = 1)
+
+qsave(cao, "cao_neurons_dis.qs", nthreads = 10)
+```
+
+# Glia
+
+## Conos
+
+```{r}
+cell.ids.glia <- anno.major[anno.major %in% c("Oligodendrocytes","Astrocytes","OPCs")] %>% 
+  names()
+
+cms.glia <- cms.all %>% 
+  lapply(\(cm) cm[,colnames(cm) %in% cell.ids.glia]) %>% 
+  setNames(cms.all %>% names())
+
+cms.preprocessed <- lapply(cms.glia, 
+                           basicP2proc, 
+                           n.cores = 50, 
+                           min.cells.per.gene = 10, 
+                           get.largevis = FALSE, 
+                           get.tsne = FALSE, 
+                           make.geneknn = FALSE)
+
+con <- Conos$new(cms.preprocessed, 
+                 n.cores = 100, 
+                 verbose = TRUE)
+
+con$buildGraph(space = "CPCA", alignment.strength = 0.1)
+con$findCommunities()
+con$embedGraph(method = "largeVis", embedding.name = "largeVis_CPCA_AS01")
+
+qsave(con, "con_oligo_astro_opc.qs", nthreads = 10)
+```
+
+## Cacoa
+
+CTRL vs MSA
+
+```{r, eval = F}
+con_msa <- Conos$new(con$samples[!grepl("PD",names(con$samples))])
+
+sample.groups <- con_msa$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "MSA"), .)
+
+con_msa$buildGraph()
+con_msa$findCommunities()
+con_msa$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_msa, sample.groups, anno, ref.level = "CTRL", target.level = "MSA", n.cores = 32)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes()
+
+qsave(cao, "cao_oligo_astro_opc_msa.qs", nthreads = 10)
+```
+
+CTRL vs PD
+
+```{r, eval = F}
+con_pd <- Conos$new(con$samples[!grepl("MSA",names(con$samples))])
+
+sample.groups <- con_pd$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "PD"), .)
+
+con_pd$buildGraph()
+con_pd$findCommunities()
+con_pd$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_pd, sample.groups, anno, ref.level = "CTRL", target.level = "PD", n.cores = 32)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes()
+
+qsave(cao, "cao_oligo_astro_opc_pd.qs", nthreads = 10)
+```
+
+PD vs MSA
+
+```{r, eval = F}
+con_dis <- Conos$new(con$samples[!grepl("CTRL",names(con$samples))])
+
+sample.groups <- con_dis$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("PD", .), "PD", "MSA"), .)
+
+con_dis$buildGraph()
+con_dis$findCommunities()
+con_dis$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_dis, sample.groups, anno, ref.level = "PD", target.level = "MSA", n.cores = 32)
+
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes()
+
+qsave(cao, "cao_oligo_astro_opc_dis.qs", nthreads = 10)
+```
+
+# Oligodendrocytes
+
+## Conos
+
+```{r}
+cms <- cms.per.ct[["Oligodendrocytes"]]
+
+cms.preprocessed <- lapply(cms, 
+                           basicP2proc, 
+                           n.cores = 50, 
+                           min.cells.per.gene = 10, 
+                           get.largevis = FALSE, 
+                           get.tsne = FALSE, 
+                           make.geneknn = FALSE)
+
+con <- Conos$new(cms.preprocessed, 
+                 n.cores = 100, 
+                 verbose = TRUE)
+
+con$buildGraph(space = "CPCA")
+con$findCommunities()
+con$embedGraph(method = "largeVis", embedding.name = "largeVis_CPCA")
+```
+
+## Cacoa
+
+CTRL vs MSA
+
+```{r}
+con_msa <- Conos$new(con$samples[!grepl("PD",names(con$samples))])
+
+sample.groups <- con_msa$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "MSA"), .)
+
+con_msa$buildGraph()
+con_msa$findCommunities()
+con_msa$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_msa, sample.groups, anno, ref.level = "CTRL", target.level = "MSA", n.cores = 50)
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_oligo_msa.qs", nthreads = 10)
+```
+
+CTRL vs PD
+
+```{r}
+con_pd <- Conos$new(con$samples[!grepl("MSA",names(con$samples))])
+
+sample.groups <- con_pd$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "PD"), .)
+
+con_pd$buildGraph()
+con_pd$findCommunities()
+con_pd$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_pd, sample.groups, anno, ref.level = "CTRL", target.level = "PD", n.cores = 50)
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_oligo_pd.qs", nthreads = 10)
+```
+
+PD vs MSA
+
+```{r}
+con_dis <- Conos$new(con$samples[!grepl("CTRL",names(con$samples))])
+
+sample.groups <- con_dis$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("MSA", .), "MSA", "PD"), .)
+
+con_dis$buildGraph()
+con_dis$findCommunities()
+con_dis$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_dis, sample.groups, anno, ref.level = "PD", target.level = "MSA", n.cores = 50)
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_oligo_dis.qs", nthreads = 10)
+```
+
+# Astrocytes
+
+## Conos
+
+```{r}
+cms <- cms.per.ct[["Astrocytes"]]
+
+cms.preprocessed <- lapply(cms, 
+                           basicP2proc, 
+                           n.cores = 50, 
+                           min.cells.per.gene = 10, 
+                           get.largevis = FALSE, 
+                           get.tsne = FALSE, 
+                           make.geneknn = FALSE,
+                           nPcs = 50)
+
+con <- Conos$new(cms.preprocessed, 
+                 n.cores = 100, 
+                 verbose = TRUE)
+
+con$buildGraph(space = "CPCA")
+con$findCommunities()
+con$embedGraph(method = "largeVis")
+```
+
+## Export to Python
+
+```{r}
+annotation <- qread("anno_astro.qs")
+
+con$samples %>% 
+  lapply(conos:::getGenes) %>% 
+  Reduce(union, .) %>% 
+  .[grep("MT-|RPS|RPL", .)] %>% 
+  prepareObjectsForPython(con, 
+                          annotation,
+                          "",
+                          "astrocytes",
+                          "largeVis_CPCA",
+                          genes.to.omit = .)
+```
+
+## Cacoa
+
+CTRL vs MSA
+
+```{r}
+con_msa <- Conos$new(con$samples[!grepl("PD",names(con$samples))])
+
+sample.groups <- con_msa$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "MSA"), .)
+
+con_msa$buildGraph()
+con_msa$findCommunities()
+con_msa$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_msa, sample.groups, anno, ref.level = "CTRL", target.level = "MSA", n.cores = 50)
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_astro_msa.qs", nthreads = 10)
+```
+
+CTRL vs PD
+
+```{r, eval = F}
+con_pd <- Conos$new(con$samples[!grepl("MSA",names(con$samples))])
+
+sample.groups <- con_pd$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "PD"), .)
+
+con_pd$buildGraph()
+con_pd$findCommunities()
+con_pd$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_pd, sample.groups, anno, ref.level = "CTRL", target.level = "PD", n.cores = 50)
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_astro_pd.qs", nthreads = 10)
+```
+
+PD vs MSA
+
+```{r, eval = F}
+con_dis <- Conos$new(con$samples[!grepl("CTRL",names(con$samples))])
+
+sample.groups <- con_dis$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("MSA", .), "MSA", "PD"), .)
+
+con_dis$buildGraph()
+con_dis$findCommunities()
+con_dis$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_dis, sample.groups, anno, ref.level = "PD", target.level = "MSA", n.cores = 50)
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_astro_dis.qs", nthreads = 10)
+```
+
+# Microglia and PVMs
+
+## Conos
+
+```{r}
+cell.ids.micro_pmv <- anno.major[anno.major %in% c("PVMs","Microglia")] %>% 
+  names()
+
+cms.micro_pmv <- cms.all %>% 
+  lapply(\(cm) cm[,colnames(cm) %in% cell.ids.micro_pmv]) %>% 
+  setNames(cms.all %>% names())
+
+cms.preprocessed <- lapply(cms.micro_pmv, 
+                           basicP2proc, 
+                           n.cores = 50, 
+                           min.cells.per.gene = 10, 
+                           get.largevis = FALSE, 
+                           get.tsne = FALSE, 
+                           make.geneknn = FALSE)
+
+con <- Conos$new(cms.preprocessed, 
+                 n.cores = 100, 
+                 verbose = TRUE)
+
+con$buildGraph(space = "CPCA")
+con$findCommunities()
+con$embedGraph(method = "largeVis", embedding.name = "largeVis_CPCA")
+```
+
+## Export for Python
+
+```{r}
+annotation <- qread("anno_micro_pvm.qs")
+
+con$samples %>% 
+  lapply(conos:::getGenes) %>% 
+  Reduce(union, .) %>% 
+  .[grep("MT-|RPS|RPL", .)] %>% 
+  prepareObjectsForPython(con, 
+                          annotation,
+                          "",
+                          "microglia_pvms",
+                          "largeVis_CPCA", 
+                          genes.to.omit = .)
+```
+
+## Cacoa
+
+CTRL vs combined disease
+
+```{r}
+cao <- Cacoa$new(con, sample.groups, anno, ref.level = "CTRL", target.level = "DISEASE", n.cores = 50)
+
+qsave(cao, "cao_micro_pvm.qs", nthreads = 10)
+```
+
+CTRL vs MSA
+
+```{r}
+con_msa <- Conos$new(con$samples[!grepl("PD",names(con$samples))])
+
+sample.groups <- con_msa$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "MSA"), .)
+
+con_msa$buildGraph()
+con_msa$findCommunities()
+con_msa$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_msa, sample.groups, anno, ref.level = "CTRL", target.level = "MSA", n.cores = 50)
+
+cao$estimateCellLoadings()
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_micro_pvm_msa.qs", nthreads = 10)
+```
+
+CTRL vs PD
+
+```{r}
+con_pd <- Conos$new(con$samples[!grepl("MSA",names(con$samples))])
+
+sample.groups <- con_pd$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("CTRL", .), "CTRL", "PD"), .)
+
+con_pd$buildGraph()
+con_pd$findCommunities()
+con_pd$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_pd, sample.groups, anno, ref.level = "CTRL", target.level = "PD", n.cores = 50)
+
+cao$estimateCellLoadings()
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_micro_pvm_pd.qs", nthreads = 10)
+```
+
+PD vs MSA
+
+```{r}
+con_dis <- Conos$new(con$samples[!grepl("CTRL",names(con$samples))])
+
+sample.groups <- con_dis$samples %>% 
+  names() %>% 
+  setNames(ifelse(grepl("MSA", .), "MSA", "PD"), .)
+
+con_dis$buildGraph()
+con_dis$findCommunities()
+con_dis$embedGraph(method = "largeVis")
+
+cao <- Cacoa$new(con_dis, sample.groups, anno, ref.level = "PD", target.level = "MSA", n.cores = 50)
+
+cao$estimateCellLoadings()
+
+## At this stage we'll remove mitochondrial and ribosomal genes since they skew DE/GO results, and they are ambient/unreal in single nucleus data.
+
+all.genes <- cao$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit <- all.genes %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao$estimateDEPerCellType(resampling.method = "bootstrap", genes.to.omit = genes.to.omit)
+cao$estimateOntology(type = "GSEA", 
+                     org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao$estimateOntologyFamilies(name = "GSEA")
+
+qsave(cao, "cao_micro_pvm_dis.qs", nthreads = 10)
+```
+
