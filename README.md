@@ -1,20 +1,26 @@
 This repository contains information necessary to reproduce the figures in the paper **Single-nucleus brain transcriptomics reveals microglia dysfunction in Multiple System Atrophy brains** by Rydbirk *et al*.
 
-We provide objects necessary to produce all figures presented in the manuscript, except for QC which we provide as reports due to GDPR restrictions.
+We provide objects necessary to produce all figures presented in the manuscript, except for QC which we provide as a report due to GDPR restrictions.
 
 # Documents overview
 
-- [Objects preparations in R including exports to Python (R Markdown)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/)
+- [QC (R Markdown)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/)
 
-- [Objects preparations in Python (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/)
+- [Objects preparations in R including exports to Python (R Markdown)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.Rmd)
+
+- [Objects preparations in Python (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.Rmd)
 
 - Manuscript figures in R, [HTML](https://htmlpreview.github.io/?https://raw.githubusercontent.com/rrydbirk/MSAvsPD/main/Manuscript_figures.html) / [R Markdown](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Manuscript_figures.Rmd)
 
-- [Velocity figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/)
+- [Velocity figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Velocity.ipynb)
 
-- [Scenic figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/)
+- [Scenic figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Scenic.ipynb)
 
-- [Liana figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/)
+- [Liana figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Liana.ipynb)
+
+- [ScDRS figures, Chia *et al.* GWAS summary statistics (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/scDRS_MSA.ipynb)
+
+- [ScDRs figures, Nalls *et al.* GWAS summary statistics (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/scDRS_PD.ipynb)
 
 # Data overview
 
@@ -25,6 +31,10 @@ All ZIP archives must be unpacked before creating figures.
 - [Conos object containing all cells (2.7 GB)]()
 
   Size: 2911507781 bytes; MD5 checksum: 1dc92750fb0d9dc4ec331eaab32466d6
+  
+- [Conos object containing most glial cells (3.3 GB)]()
+
+  Size: 3437527583 bytes; MD5 checksum: 2ef036d9b001792415b6219be5c80b18
   
 - Cacoa objects
 
