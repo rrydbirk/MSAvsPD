@@ -4,7 +4,7 @@ We provide objects necessary to produce all figures presented in the manuscript,
 
 # Documents overview
 
-- [QC (R Markdown)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/)
+- [QC (HTML)](https://htmlpreview.github.io/?https://raw.githubusercontent.com/rrydbirk/MSAvsPD/main/QC.html)
 
 - [Objects preparations in R including exports to Python (R Markdown)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.Rmd)
 
@@ -82,9 +82,9 @@ All ZIP archives must be unpacked before creating figures.
 
   Size: 4086141606 bytes; MD5 checksum: 6d9b4dbd5da0d831fb27424dd4476202
   
-- [Remaining data (ZIP archive containing additional ZIP archives, 2.3 GB)]()
+- [Remaining data (ZIP archive containing additional ZIP archives, 3.9 GB)]()
 
-  Size: 2375719653 bytes; MD5 checksum: c36d30cfe2077a8dfd8a2636c56b39f9
+  Size: 4122879278 bytes; MD5 checksum: 4d900e7ae5dcdfced437ab721c4573bc
   
 
   
