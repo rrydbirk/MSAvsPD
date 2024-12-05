@@ -8,7 +8,7 @@ We provide objects necessary to produce all figures presented in the manuscript,
 
 - [Objects preparations in R including exports to Python (R Markdown)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.Rmd)
 
-- [Objects preparations in Python (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.Rmd)
+- [Objects preparations in Python (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.ipynb)
 
 - Manuscript figures in R, [HTML](https://htmlpreview.github.io/?https://raw.githubusercontent.com/rrydbirk/MSAvsPD/main/Manuscript_figures.html) / [R Markdown](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Manuscript_figures.Rmd)
 
