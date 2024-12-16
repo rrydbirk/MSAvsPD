@@ -2,6 +2,10 @@ This repository contains information necessary to reproduce the figures in the p
 
 We provide objects necessary to produce all figures presented in the manuscript, except for QC which we provide as a report due to GDPR restrictions.
 
+# Supplementary material
+
+- [Supplementary Video 2 (MP4, 1.9 GB)](https://kkh.bric.ku.dk/rasmus/SupplementaryVideo2.mp4)
+
 # Documents overview
 
 - [QC (HTML)](https://htmlpreview.github.io/?https://raw.githubusercontent.com/rrydbirk/MSAvsPD/main/QC.html)
