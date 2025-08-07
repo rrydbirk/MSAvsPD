@@ -8,13 +8,13 @@ We provide objects necessary to produce all figures presented in the manuscript,
 
 # Documents overview
 
-- [QC (HTML)](https://htmlpreview.github.io/?https://raw.githubusercontent.com/rrydbirk/MSAvsPD/main/QC.html)
+- [QC (HTML)](https://rrydbirk.github.io/MSAvsPD/QC.html)
 
 - [Objects preparations in R including exports to Python (R Markdown)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.Rmd)
 
 - [Objects preparations in Python (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Objects_preparations.ipynb)
 
-- Manuscript figures in R, [HTML](https://htmlpreview.github.io/?https://raw.githubusercontent.com/rrydbirk/MSAvsPD/main/Manuscript_figures.html) / [R Markdown](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Manuscript_figures.Rmd)
+- Manuscript figures in R, [HTML](https://rrydbirk.github.io/MSAvsPD/Manuscript_figures.html) / [R Markdown](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Manuscript_figures.Rmd)
 
 - [Velocity figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Velocity.ipynb)
 
