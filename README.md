@@ -16,8 +16,6 @@ We provide objects necessary to produce all figures presented in the manuscript,
 
 - Manuscript figures in R, [HTML](https://rrydbirk.github.io/MSAvsPD/Manuscript_figures.html) / [R Markdown](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Manuscript_figures.Rmd)
 
-- [Velocity figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Velocity.ipynb)
-
 - [Scenic figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Scenic.ipynb)
 
 - [Liana figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/Liana.ipynb)
@@ -25,6 +23,8 @@ We provide objects necessary to produce all figures presented in the manuscript,
 - [ScDRS figures, Chia *et al.* GWAS summary statistics (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/scDRS_MSA.ipynb)
 
 - [ScDRs figures, Nalls *et al.* GWAS summary statistics (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/scDRS_PD.ipynb)
+
+- [scCODA figures (Jupyter Notebook)](https://www.github.com/rrydbirk/MSAvsPD/blob/main/scCODA.ipynb)
 
 # Data overview
 
