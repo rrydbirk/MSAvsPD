@@ -34,6 +34,9 @@ library(ComplexHeatmap)
 library(stringr)
 library(rstatix)
 library(slingshot)
+library(gamm4)
+library(scITD)
+library(ggraph)
 
 ## Comparisons
 comp <- list(c("CTRL","MSA"),
@@ -166,16 +169,16 @@ tt <- Sys.time()
 Define helper functions
 
 ```{r}
-getOntWithFamily <- function(cao, comp) {
-  fams <- cao$test.results[["GSEA"]]$families
+getOntWithFamily <- function(cao, comp, name = "GSEA") {
+  fams <- cao$test.results[[name]]$families
   
-  df.all <- list(cao$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "up", p.adj = 1, q.value = 1),
-                 cao$.__enclos_env__$private$getOntologyPvalueResults(name = "GSEA", genes = "down", p.adj = 1, q.value = 1)) %>% 
+  df.all <- list(cao$.__enclos_env__$private$getOntologyPvalueResults(name = name, genes = "up", p.adj = 1, q.value = 1),
+                 cao$.__enclos_env__$private$getOntologyPvalueResults(name = name, genes = "down", p.adj = 1, q.value = 1)) %>% 
     bind_rows() %>% 
     mutate(logp = -log10(p.adjust),
            comp = comp)
   
-  df <- cacoa:::getOntologyFamilyChildren(df.all, fams=fams, type = "GSEA", subtype = "BP")
+  df <- cacoa:::getOntologyFamilyChildren(df.all, fams=fams, type = name, subtype = "BP")
   
   return(list(df.all = df.all,
               df = df,
@@ -417,11 +420,19 @@ plotGenePseudoBulk <- function(gene, cm.pseudo, legend = T) {
 
 # Figure 1
 
+## Load data
+
+```{r}
+cao_msa <- qread("cao_major_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_major_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_major_dis.qs", nthreads = 10)
+```
+
 ## Figure 1b
 
 ```{r, fig.width=5.7, fig.height=4}
 con$plotGraph(groups = anno.major, 
-              embedding = "UMAP",
+              embedding = "UMAP_1_0.001_5",
               size = 0.1, 
               palette = pal.major, 
               font.size = 3, 
@@ -433,19 +444,12 @@ con$plotGraph(groups = anno.major,
               alpha = 0.05) + 
   dotSize(3) +
   labs(x="UMAP1", y= "UMAP2") +
-  theme(line = element_blank())
+  theme(line = element_blank()) +
+  ylim(c(-20, 15)) +
+  xlim(c(-21, 11))
 ```
 
 ## Figure 1c
-
-```{r fig.height=24, fig.width=8}
-c("RBFOX3","MOG","VCAN","AQP4","CSF1R","PDGFRB","PTPRC","MRC1","GAD1","SLC17A7","PPP1R1B") %>%
-  sort() %>% 
-  lapply(function(g) con$plotGraph(embedding = "UMAP", gene=g, title=g, size=0.1, plot.na = F, palette = colorRampPalette(c("grey90","firebrick"))) + theme(line = element_blank())) %>%
-  cowplot::plot_grid(plotlist=., ncol=2)
-```
-
-## Figure 1d
 
 ```{r, fig.height=4, fig.width=5}
 cm.merged <- con$getJointCountMatrix()
@@ -460,17 +464,7 @@ dotPlot(markers,
         gene.order = markers)
 ```
 
-# Figure 2
-
-## Load data
-
-```{r}
-cao_msa <- qread("cao_major_msa.qs", nthreads = 10)
-cao_pd <- qread("cao_major_pd.qs", nthreads = 10)
-cao_dis <- qread("cao_major_dis.qs", nthreads = 10)
-```
-
-## Figure 2a
+## Figure 1d
 
 ```{r}
 spc <- con$getDatasetPerCell()
@@ -481,12 +475,12 @@ cpc <- spc %>%
   `names<-`(names(spc))
 
 con$plotGraph(groups = cpc, 
-              embedding = "UMAP",
+              embedding = "UMAP_1_0.001_5",
               size = 0.1, 
               alpha = 0.05,
               palette = pal.major, 
               font.size = 3, 
-              raster = T, 
+              raster = F, 
               show.labels = T,
               plot.na = F,
               mark.groups = F,
@@ -497,7 +491,7 @@ con$plotGraph(groups = cpc,
   dotSize(3)
 ```
 
-## Figure 2b
+## Figure 1e
 
 ```{r, fig.height=4, fig.width=3}
 cao_msa$plotCellLoadings(show.pvals = F, 
@@ -516,7 +510,7 @@ cao_msa$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 2c
+## Figure 1f
 
 ```{r, fig.height=4, fig.width=3}
 cao_pd$plotCellLoadings(show.pvals = F, 
@@ -536,7 +530,7 @@ cao_pd$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 2d
+## Figure 1g
 
 ```{r, fig.height=4, fig.width=3}
 cao_dis$plotCellLoadings(show.pvals = F, 
@@ -556,19 +550,28 @@ cao_dis$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 2e
+## Figure 1h
 
 ```{r, fig.width = 6, fig.height = 4}
 cao_msa$cell.groups.palette <- pal.major
-cao_pd$cell.groups.palette <- pal.major
-cao_dis$cell.groups.palette <- pal.major
-
 cao_msa$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
-cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
-cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
 ```
 
-# Figure 3
+## Figure 1i
+
+```{r}
+cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_pd$cell.groups.palette <- pal.major
+```
+
+## Figure 1j
+
+```{r}
+cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_dis$cell.groups.palette <- pal.major
+```
+
+# Figure 2
 
 ## Load data
 
@@ -579,7 +582,7 @@ cao_pd <- qread("cao_neurons_pd.qs", nthreads = 10)
 cao_dis <- qread("cao_neurons_dis.qs", nthreads = 10)
 ```
 
-## Figure 3a
+## Figure 2a
 
 ```{r, fig.height=4, fig.width=4}
 cao$plotEmbedding(groups = cao$cell.groups,
@@ -594,7 +597,7 @@ cao$plotEmbedding(groups = cao$cell.groups,
   labs(x="largeVis1", y= "largeVis2")
 ```
 
-## Figure 3b
+## Figure 2b
 
 ```{r, fig.width=6.7, fig.height=4}
 cm.merged <- cao$data.object$getJointCountMatrix()
@@ -608,7 +611,7 @@ dotPlot(markers,
         gene.order = markers)
 ```
 
-## Figure 3c
+## Figure 2c
 
 ```{r, fig.height=4, fig.width=3}
 cao_msa$plotCellLoadings(show.pvals = F, 
@@ -627,7 +630,7 @@ cao_msa$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 3d
+## Figure 2d
 
 ```{r, fig.height=4, fig.width=3}
 cao_pd$plotCellLoadings(show.pvals = F, 
@@ -647,7 +650,7 @@ cao_pd$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 3e
+## Figure 2e
 
 ```{r, fig.height=4, fig.width=3}
 cao_dis$plotCellLoadings(show.pvals = F, 
@@ -666,16 +669,30 @@ cao_dis$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 3f
+## Figure 2f
+
+```{r, fig.width = 8.5, fig.height = 5}
+cao_msa$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
+```
+
+## Figure 2g
 
 ```{r, fig.height=4, fig.width=4}
 sample.groups <- cao$sample.groups
 
-cao$plotCellDensity(show.cell.groups = F)$CTRL +
-  geom_circle(aes(x0 = 0.75, y0 = -4.5, r = 1)) +
-  geom_circle(aes(x0 = 3.8, y0 = -1.1, r = 0.5), col = "cyan3") +
-  theme(line = element_blank())
+cao$estimateCellDensity(method = "graph")
+cao$estimateDiffCellDensity(type = "subtract")
 
+cao$plotCellDensity(show.cell.groups = F, show.legend = F, color.range = c(0, 0.00035))$CTRL +
+  geom_circle(aes(x0 = 30.9, y0 = 10, r = 10)) +
+  geom_circle(aes(x0 = 17.5, y0 = 24, r = 4), col = "cyan3") +
+  theme(line = element_blank())
+```
+
+
+```{r, fig.height=4, fig.width=4}
 # MSA
 cao$sample.groups <- sample.groups %>% 
   names() %>% 
@@ -685,11 +702,14 @@ cao$sample.groups <- sample.groups %>%
 cao$target.level <- "MSA"
 cao$estimateCellDensity(method = "graph", name = "msa.density")
 cao$estimateDiffCellDensity(type = "subtract", name = "msa.density")
-cao$plotCellDensity(show.cell.groups = F, name = "msa.density")$MSA +
-  geom_circle(aes(x0 = 0.75, y0 = -4.5, r = 1)) +
-  geom_circle(aes(x0 = 3.8, y0 = -1.1, r = 0.5), col = "cyan3") +
+cao$plotCellDensity(show.cell.groups = F, name = "msa.density", show.legend = F, color.range = c(0, 0.00035))$MSA +
+  geom_circle(aes(x0 = 30.9, y0 = 10, r = 10)) +
+  geom_circle(aes(x0 = 17.5, y0 = 24, r = 4), col = "cyan3") +
   theme(line = element_blank())
+```
 
+
+```{r, fig.height=4, fig.width=5.1}
 # PD
 cao$sample.groups <- sample.groups %>%
   names() %>%
@@ -699,21 +719,13 @@ cao$sample.groups <- sample.groups %>%
 cao$target.level <- "PD"
 cao$estimateCellDensity(method = "graph", name = "pd.density")
 cao$estimateDiffCellDensity(type = "subtract", name = "pd.density")
-cao$plotCellDensity(show.cell.groups = F, name = "pd.density")$PD +
-  geom_circle(aes(x0 = 0.75, y0 = -4.5, r = 1)) +
-  geom_circle(aes(x0 = 3.8, y0 = -1.1, r = 0.5), col = "cyan3") +
+cao$plotCellDensity(show.cell.groups = F, name = "pd.density", show.legend = T, color.range = c(0, 0.00035))$PD +
+  geom_circle(aes(x0 = 30.9, y0 = 10, r = 10)) +
+  geom_circle(aes(x0 = 17.5, y0 = 24, r = 4), col = "cyan3") +
   theme(line = element_blank())
 ```
 
-## Figure 3g
-
-```{r, fig.width = 8.5, fig.height = 5}
-cao_msa$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
-cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
-cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
-```
-
-# Figure 4
+# Figure 3
 
 ## Load data
 
@@ -725,7 +737,7 @@ cao_pd <- qread("cao_oligo_astro_opc_pd.qs", nthreads = 10)
 cao_dis <- qread("cao_oligo_astro_opc_dis.qs", nthreads = 10)
 ```
 
-## Figure 4a
+## Figure 3a
 
 ```{r, fig.width=4, fig.height=4}
 con.glia$plotGraph(groups = anno.glia, 
@@ -740,7 +752,7 @@ con.glia$plotGraph(groups = anno.glia,
   theme(line = element_blank())
 ```
 
-## Figure 4b
+## Figure 3b
 
 ```{r, fig.height=4, fig.width=4.5}
 cm.merged <- con.glia$getJointCountMatrix()
@@ -754,7 +766,7 @@ dotPlot(markers,
         gene.order = markers)
 ```
 
-## Figure 4c
+## Figure 3c
 
 ```{r, fig.height=4, fig.width=3}
 cao_msa$plotCellLoadings(show.pvals = F, 
@@ -774,7 +786,7 @@ cao_msa$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 4d
+## Figure 3d
 
 ```{r, fig.height=4, fig.width=3}
 cao_pd$plotCellLoadings(show.pvals = F, 
@@ -794,7 +806,7 @@ cao_pd$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 4e
+## Figure 3e
 
 ```{r, fig.height=4, fig.width=3}
 cao_dis$plotCellLoadings(show.pvals = F, 
@@ -814,7 +826,7 @@ cao_dis$plotCellLoadings(show.pvals = F,
   labs(x = "", y = "")
 ```
 
-## Figure 4f
+## Figure 3f
 
 ```{r, fig.width = 7, fig.height = 5}
 cao_msa$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
@@ -822,7 +834,14 @@ cao_pd$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distanc
 cao_dis$plotExpressionShiftMagnitudes() + labs(y = "Normalized expression distance")
 ```
 
-## Figure 4h,i
+```{r, echo=F}
+rm(con.glia)
+gc()
+```
+
+# Figure 4
+
+## Figure 4a,b
 
 ```{r, fig.width=14, fig.height=5}
 cao_msa <- qread("cao_astro_msa.qs", nthreads = 10)
@@ -838,7 +857,7 @@ df.all <- Map(getOntWithFamily, list(cao_msa, cao_pd, cao_dis), c("CTRL vs. MSA"
 p.ids <- c("GO:0050821", "GO:0050728", "GO:0006986", "GO:0030168", "GO:0030001", "GO:1904707", "GO:0140053", "GO:0006486", "GO:0010717", "GO:0031113", "GO:0032675", "GO:0061041", "GO:0071222", "GO:0045766", "GO:0006487", "GO:0097501", "GO:0042776", "GO:0045047", "GO:0044794", "GO:0035633", "GO:0097242", "GO:0006120", "GO:0042026", "GO:0006979", "GO:0071222", "GO:0017015", "GO:0009611", "GO:1901201", "GO:0042594", "GO:0097501", "GO:0006123", "GO:0006909", "GO:0007179", "GO:0006120", "GO:0097501")
 ```
 
-### Figure 4h
+### Figure 4a
 
 ```{r, fig.width=14, fig.height=3}
 ct <- "AS_homeostatic"
@@ -900,7 +919,7 @@ p3 <- df %>%
 plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
 ```
 
-### Figure 4i
+### Figure 4b
 
 ```{r, fig.width=14, fig.height=3}
 ct <- "AS_reactive"
@@ -961,7 +980,7 @@ p3 <- df %>%
 plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
 ```
 
-## Figure 4j
+## Figure 4c
 
 ```{r, fig.width=14, fig.height=3}
 cao_msa <- qread("cao_oligo_msa.qs", nthreads = 10)
@@ -1034,7 +1053,7 @@ p3 <- df %>%
 plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
 ```
 
-## Figure 4k,l
+## Figure 4d,e
 
 ```{r}
 cm.merged <- con$getJointCountMatrix(raw = T) %>% 
@@ -1075,7 +1094,7 @@ cm.pseudo %<>%
   DESeq2::counts(normalized = T)
 ```
 
-### Figure 4k
+### Figure 4d
 
 ```{r, fig.width=4, fig.height=4}
 # For DE between visits
@@ -1120,7 +1139,7 @@ plot.dat %>%
   stat_pvalue_manual(stat.test)
 ```
 
-### Figure 4l
+### Figure 4e
 
 ```{r, fig.width=4, fig.height=4}
 # For DE between visits
@@ -1166,7 +1185,7 @@ plot.dat %>%
   ylim(c(0, 180))
 ```
 
-## Figure 4m
+## Figure 4f
 
 For calculation of data, see `Liana.ipynb`.
 
@@ -1206,7 +1225,7 @@ dat.rel %>%
   lianaCircos()
 ```
 
-# Figure 5 & EDF7
+# Figure 5 & EDF13
 
 ## Load data
 
@@ -1249,7 +1268,7 @@ dotPlot(markers,
         cols = c("white","firebrick"))
 ```
 
-## Figure 5d-f
+## Figure 5c-e
 
 ```{r}
 anno.sort <- anno.micro[rownames(cao$data.object$embedding)]
@@ -1262,7 +1281,7 @@ ldata2 <- getTscanTrajectory(cao$data.object, anno.sel2)
 ldata <- rbind(ldata1, ldata2)
 ```
 
-### Figure 5d
+### Figure 5c
 
 ```{r}
 cao$data.object$embedding %>% 
@@ -1280,7 +1299,7 @@ cao$data.object$embedding %>%
   dotSize(3)
 ```
 
-## Figures 5e,f & EDF7
+## Figures 5d,e & EDF13
 
 Prepare data
 
@@ -1325,8 +1344,6 @@ mt <- mat %>%
 ```
 
 ```{r, eval = F}
-library(gamm4)
-
 res <- mt %>% 
   sccore::plapply(\(x) {
     fit_full <- gamm4(data = x, formula = value ~ s(pseudotime, by = factor(condition)), random = ~(1 | sample), REML = F)
@@ -1354,7 +1371,7 @@ res <- mt %>%
 qsave(res, "pseudotime_micro_l2.qs")
 ```
 
-### Figure 5e
+### Figure 5d
 
 ```{r}
 cao$data.object$embedding %>% 
@@ -1371,7 +1388,7 @@ cao$data.object$embedding %>%
   labs(col = "Pseudotime", x = "UMAP1", y = "UMAP2")
 ```
 
-### Figure 5f
+### Figure 5e
 
 Please note, row order may change per iteration.
 
@@ -1415,7 +1432,12 @@ Heatmap(Smooth,
         row_names_gp = grid::gpar(fontsize = 5))
 ```
 
-### Extended Data Figure 7
+```{r, echo = F}
+rm(cao)
+gc()
+```
+
+### Extended Data Figure 13
 
 We provide this figure here since all data are already loaded.
 
@@ -1438,7 +1460,7 @@ res[rownames(Smooth)] %>%
   facet_wrap(~gene, ncol = 5, scales = "free")
 ```
 
-## Figure 5g
+## Figure 5f
 
 ```{r, fig.height=4, fig.width=3}
 cao_msa$plotCellLoadings(show.pvals = F, 
@@ -1458,7 +1480,7 @@ cao_msa$plotCellLoadings(show.pvals = F,
   theme(line = element_blank())
 ```
 
-## Figure 5h
+## Figure 5g
 
 ```{r, fig.height=4, fig.width=3}
 cao_pd$plotCellLoadings(show.pvals = F, 
@@ -1478,7 +1500,7 @@ cao_pd$plotCellLoadings(show.pvals = F,
   theme(line = element_blank())
 ```
 
-## Figure 5i
+## Figure 5h
 
 ```{r, fig.height=4, fig.width=3}
 cao_dis$plotCellLoadings(show.pvals = F, 
@@ -1498,7 +1520,12 @@ cao_dis$plotCellLoadings(show.pvals = F,
   theme(line = element_blank())
 ```
 
-## Figure 5k
+```{r, echo = F}
+rm(cao_dis)
+gc()
+```
+
+## Figure 5j
 
 We provide combined data from the RNAscope experiments as a single file `res.qs`.
 
@@ -1549,7 +1576,7 @@ p2 <- res %>%
 plot_grid(plotlist = list(p1, p2), ncol = 1)
 ```
 
-## Figure 5l
+## Figure 5k
 
 ```{r, fig.width=12, fig.height=3}
 fams <- cao_msa$test.results[["GSEA"]]$families
@@ -1611,7 +1638,12 @@ p3 <- df %>%
 plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
 ```
 
-## Figure 5m
+```{r, echo = F}
+rm(cao_msa)
+gc()
+```
+
+## Figure 5l
 
 ```{r, fig.width=12, fig.height=3}
 fams <- cao_pd$test.results[["GSEA"]]$families
@@ -1673,6 +1705,11 @@ p3 <- df %>%
   guides(col = "none")
 
 plot_grid(plotlist = list(p3, p1, p2), ncol = 3, rel_widths = c(0.9, 1, 0.9))
+```
+
+```{r, echo = F}
+rm(cao_pd)
+gc()
 ```
 
 # Figure 6
@@ -1802,6 +1839,101 @@ dat.melt %>%
   theme(line = element_blank())
 ```
 
+## Figure 6j
+
+Here, we use data from [Rydbirk *et al*.](https://pmc.ncbi.nlm.nih.gov/articles/PMC9164190/) on differentially expressed proteins in the soluble fraction of CSF pools. 
+
+```{r, fig.width=6, fig.height=4}
+dat <- read.delim("Soluble_fraction.txt")
+
+msa.dep <- dat %>% 
+  filter(Disease.group == "MSA") %>% 
+  pull(Gene.name)
+
+pd.dep <- dat %>% 
+  filter(Disease.group == "PD") %>% 
+  pull(Gene.name)
+
+overlap <- intersect(msa.dep, pd.dep)
+
+highlight_proteins <- c("CTSS", "FCGR2A", "LAMP1", "CTSD", "CLTC")
+
+msa.dep %<>% .[!. %in% overlap]
+pd.dep %<>% .[!. %in% overlap]
+overlap %<>% .[!. %in% highlight_proteins]
+
+string_db <- STRINGdb$new(
+  version = "12.0",       # or latest available
+  species = 9606,         # 9606 = Homo sapiens
+  score_threshold = 400,  # confidence score cutoff
+  input_directory = ""
+)
+
+genes <- c(msa.dep, pd.dep, overlap)
+
+mapped_genes <- string_db$map(
+  data.frame(gene = genes),
+  "gene",
+  removeUnmappedRows = TRUE
+)
+
+# Get interactions
+interactions <- string_db$get_interactions(mapped_genes$STRING_id)
+
+# Convert to igraph object
+ppi_graph <- graph_from_data_frame(interactions, directed = FALSE)
+
+# Create label mapping: STRING ID to gene name
+string_to_gene <- mapped_genes %>%
+  select(STRING_id, gene) %>%
+  distinct()
+
+# Add labels to graph nodes
+V(ppi_graph)$label <- string_to_gene$gene[match(V(ppi_graph)$name, string_to_gene$STRING_id)]
+
+custom_colors <- c(
+  "CTSS" = "firebrick",
+  "FCGR2A" = "purple2",
+  "LAMP1" = "purple2",
+  "CTSD" = "navyblue",
+  "CLTC" = "navyblue",
+  setNames(rep("tomato", length(msa.dep)), msa.dep),
+  setNames(rep("steelblue", length(pd.dep)), pd.dep),
+  setNames(rep("orchid", length(overlap)), overlap))
+
+# Apply color mapping to node attributes
+V(ppi_graph)$node_color <- custom_colors[V(ppi_graph)$label]
+
+# Get node labels for each edge endpoint
+edge_ends <- ends(ppi_graph, es = E(ppi_graph), names = FALSE)
+source_labels <- V(ppi_graph)$label[edge_ends[, 1]]
+target_labels <- V(ppi_graph)$label[edge_ends[, 2]]
+
+# Assign edge width
+E(ppi_graph)$edge_width <- ifelse(
+  source_labels %in% highlight_proteins & target_labels %in% highlight_proteins,
+  0.5, 0.1
+)
+
+# Compute node sizes based on label
+V(ppi_graph)$node_size <- sapply(V(ppi_graph)$label, \(x) if (x %in% overlap) 3 else if (x %in% highlight_proteins) 5 else 2)
+
+V(ppi_graph)$label_type <- ifelse(
+  V(ppi_graph)$label %in% highlight_proteins,
+  "highlight", "other"
+)
+
+# Plot the network with size and color
+ggraph(ppi_graph, layout = "fr") +
+  geom_edge_link(aes(width = I(edge_width)), alpha = 0.4) +
+  geom_node_point(aes(color = I(node_color), size = I(node_size)), show.legend = FALSE) +
+  geom_node_label(data = function(x) { x[x$label_type == "highlight", ] },
+                  aes(label = label), size = 3, label.padding = unit(0.15, "lines"), repel = TRUE, show.legend = F) +
+  geom_node_text(data = function(x) { x[x$label_type == "other", ] },
+                 aes(label = label), size = 2, repel = TRUE, show.legend = F) +
+  theme_void()
+```
+
 # Extended Data Figure 1
 
 ## Load data
@@ -1901,6 +2033,20 @@ crm$plotCbAmbGenes() +
         axis.ticks.x = element_line())
 ```
 
+```{r, echo=FALSE}
+rm(crm)
+gc()
+```
+
+## 2c
+
+```{r fig.height=24, fig.width=8}
+c("RBFOX3","MOG","VCAN","AQP4","CSF1R","PDGFRB","PTPRC","MRC1","GAD1","SLC17A7","PPP1R1B") %>%
+  sort() %>% 
+  lapply(function(g) con$plotGraph(embedding = "UMAP", gene=g, title=g, size=0.1, plot.na = F, palette = colorRampPalette(c("grey90","firebrick"))) + theme(line = element_blank())) %>%
+  cowplot::plot_grid(plotlist=., ncol=2)
+```
+
 # Extended Data Figure 3
 
 ## Load and prepare data
@@ -1927,9 +2073,96 @@ meta <- read.delim("metadata.tsv", sep = "\t") %>%
 cao$estimateExpressionShiftMagnitudes()
 cao$estimateMetadataSeparation(sample.meta = meta, 
                                space = "expression.shifts")
+
+meta %<>% 
+  tibble::rownames_to_column("sample")
 ```
 
 ## 3a
+
+```{r, fig.width=18, fig.height=16}
+spc <- con$getDatasetPerCell()
+
+mpc <- spc %>% 
+  data.frame(sample = ., cid = names(.))
+
+for (cc in colnames(meta)[-1]) {
+  mpc[[cc]] <- meta[[cc]][match(mpc$sample, meta$sample)]
+}
+
+mpc$subtype[mpc$subtype == ""] <- NA
+```
+
+```{r, fig.width=5, fig.height=4}
+p <- con$plotGraph(colors = setNames(mpc$age, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, title = "Age", size = 0.3, alpha = 0.3) +
+        scale_color_gradient(low = "grey", high = "firebrick") +
+        theme(line = element_blank()) +
+  labs(col = "Years")
+
+p
+```
+
+```{r, fig.width=5, fig.height=4}
+p <- con$plotGraph(colors = setNames(mpc$pmi, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, title = "PMI", size = 0.3, alpha = 0.3) +
+        scale_color_gradient(low = "grey", high = "firebrick") +
+        theme(line = element_blank()) +
+  labs(col = "Hours")
+
+p
+```
+
+```{r, fig.width=5, fig.height=4}
+p <- con$plotGraph(colors = setNames(mpc$disease_duration, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, title = "Disease duration", size = 0.3, alpha = 0.3) +
+        scale_color_gradient(low = "grey", high = "firebrick") +
+        theme(line = element_blank()) +
+  labs(col = "Years")
+
+p
+```
+
+```{r, fig.width=6.75, fig.height=4}
+p <- con$plotGraph(groups = setNames(mpc$sample, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, shuffle.colors = T, title = "Sample", size = 0.3, alpha = 0.3) +
+        theme(line = element_blank()) + dotSize(3)
+
+p
+```
+
+```{r, fig.width=5.25, fig.height=4}
+p <- con$plotGraph(groups = setNames(mpc$brain_bank, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, shuffle.colors = T, title = "Brain bank", size = 0.3, alpha = 0.3) +
+        theme(line = element_blank()) + dotSize(3)
+
+p
+```
+
+```{r, fig.width=5.15, fig.height=4}
+p <- con$plotGraph(groups = setNames(mpc$sex, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, shuffle.colors = T, title = "Sex", size = 0.3, alpha = 0.3) +
+        theme(line = element_blank()) + dotSize(3)
+
+p
+```
+
+```{r, fig.width=5.4, fig.height=4}
+p <- con$plotGraph(groups = setNames(mpc$subtype, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, shuffle.colors = T, title = "Subtype", size = 0.3, alpha = 0.3) +
+        theme(line = element_blank()) + dotSize(3)
+
+p
+```
+
+```{r, fig.width=5.15, fig.height=4}
+p <- con$plotGraph(groups = setNames(mpc$extract, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, shuffle.colors = T, title = "Extract", size = 0.3, alpha = 0.3) +
+        theme(line = element_blank()) + dotSize(3)
+
+p
+```
+
+```{r, fig.width=5.88, fig.height=4}
+p <- con$plotGraph(groups = setNames(mpc$flowcell, mpc$cid), plot.na = F, embedding = "UMAP_1_0.001_5", mark.groups = F, show.legend = T, shuffle.colors = T, title = "Flowcell", size = 0.3, alpha = 0.3) +
+        theme(line = element_blank()) + dotSize(3)
+
+p
+```
+
+## 3b
 
 ```{r, fig.width = 6, fig.height=4}
 cao$plotSampleDistances(space = "expression.shifts", show.sample.size = T, method = "UMAP")$data %>% 
@@ -1945,8 +2178,6 @@ cao$plotSampleDistances(space = "expression.shifts", show.sample.size = T, metho
   dotSize(3)
 ```
 
-## 3b
-
 ```{r, fig.width = 6, fig.height=4}
 cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$age %>% setNames(rownames(meta)))$data %>% 
   mutate(condition = unname(sample.groups)) %>% 
@@ -1957,8 +2188,6 @@ cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.col
         axis.ticks = element_blank()) +
   labs(x = "", y = "", title = "Age", color = "Age (y)", shape = "Condition")
 ```
-
-## 3c
 
 ```{r, fig.width = 6, fig.height=4}
 cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$brain_bank %>% setNames(rownames(meta)))$data %>% 
@@ -1971,8 +2200,6 @@ cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.col
   labs(x = "", y = "", title = "Brain bank", shape = "Condition", color = "Brain bank")
 ```
 
-## 3d
-
 ```{r, fig.width = 6, fig.height=4}
 cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$extract %>% setNames(rownames(meta)))$data %>% 
   mutate(condition = unname(sample.groups)) %>% 
@@ -1983,8 +2210,6 @@ cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.col
         axis.ticks = element_blank()) +
   labs(x = "", y = "", title = "Extract", shape = "Condition", color = "Extract")
 ```
-
-## 3d
 
 ```{r, fig.width = 6, fig.height=4}
 cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$flowcell %>% setNames(rownames(meta)))$data %>% 
@@ -1997,7 +2222,1429 @@ cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.col
   labs(x = "", y = "", title = "Flowcell", shape = "Condition", color = "Flowcell")
 ```
 
-# Extended Data Figure 5
+# Extended Data Figure 4
+
+To investigate effects from co-variates, we ran scITD on all cell types for each comparison. We don't determine factors here as it takes a significant amount of time, but we keep the code in the first instance.
+
+We tested different levels of **var_scale_power**, here we're just showing **var_scale_power = 0.5** as we didn't find any effects except for OPCs. Per default, we set **vargenes_method="norm_var_pvals"** and adjusted **vargenes_thresh** to obtain around 1,000 var. genes, but in some instances we took the top most variable genes instead. 
+
+### Neurons, preparation
+
+```{r}
+con.tmp <- qread("cao_neurons.qs", nthreads = 10)$data.object
+anno <- qread("anno_neurons.qs")
+
+anno %<>% 
+  collapseAnnotation("GABA") %>%
+  collapseAnnotation("GLU") %>%
+  renameAnnotation("GABA", "Inh. neurons") %>%
+  renameAnnotation("GLU", "Exc. neurons") %>%
+  collapseAnnotation("MSN")
+
+cm.raw.all <- con.tmp$getJointCountMatrix(raw = T) %>% 
+  Matrix::t() %>% 
+  .[!grepl("MT-|RPS|RPL", rownames(.)), ]
+
+meta.all <- con.tmp$getDatasetPerCell() %>% 
+  data.frame(donors = .) %>% 
+  mutate(ctypes = anno[rownames(.)] %>% unname()) %>% 
+  .[complete.cases(.), ]
+
+metadata.all <- read.delim("metadata.tsv")
+
+for (cc in colnames(metadata.all)[-1]) {
+  meta.all[[cc]] <- metadata.all[[cc]][match(meta.all$donors, metadata.all$sample)]
+}
+
+# Convert integers to numeric
+meta.all$age %<>% as.numeric()
+meta.all$disease_duration %<>% as.numeric()
+```
+
+### CTRL vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "PD") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "PD")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw %>% .[, colnames(.) %in% rownames(meta)], 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=1,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=0.7,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r, eval = F}
+# get assistance with rank determination
+itd_container %<>% determine_ranks_tucker(max_ranks_test=c(10,15),
+                                          shuffle_level='cells',
+                                          num_iter=10,
+                                          norm_method='trim',
+                                          scale_factor=10000,
+                                          scale_var=TRUE,
+                                          var_scale_power=0.5)
+
+itd_container$plots$rank_determination_plot
+```
+
+```{r, fig.height=5, fig.width=8}
+itd_container %<>% run_tucker_ica(ranks=c(5,10),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### CTRL vs PD
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "MSA") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "MSA")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=1,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var',
+                               vargenes_thresh=500,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(5,10),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### PD vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "CTRL") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "CTRL")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=1,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var', 
+                               vargenes_thresh=500,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(5,10),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### Astrocytes, preparation
+
+```{r}
+con.tmp <- qread("con_astrocytes.qs", nthreads = 10)
+anno <- qread("anno_astro.qs")
+
+cm.raw.all <- con.tmp$getJointCountMatrix(raw = T) %>%
+  .[, !grepl("MT-|RPS|RPL", colnames(.))] %>% 
+  Matrix::t()
+
+meta.all <- con.tmp$getDatasetPerCell() %>% 
+  .[names(.) %in% names(anno)] %>% 
+  data.frame(donors = .) %>% 
+  mutate(ctypes = anno[rownames(.)] %>% unname()) %>% 
+  .[complete.cases(.), ]
+
+metadata.all <- read.delim("metadata.tsv")
+
+for (cc in colnames(metadata.all)[-1]) {
+  meta.all[[cc]] <- metadata.all[[cc]][match(meta.all$donors, metadata.all$sample)]
+}
+
+# Convert integers to numeric
+meta.all$age %<>% as.numeric()
+meta.all$disease_duration %<>% as.numeric()
+```
+
+### CTRL vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "PD") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "PD")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw %>% .[, colnames(.) %in% rownames(meta)], 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=0.05,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(5,8),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### CTRL vs PD
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "MSA") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "MSA")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=.05,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(5,9),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), # Omitting brain bank
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), # Omitting brain bank
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### PD vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "CTRL") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "CTRL")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=.05,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(6,7),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), 
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### Microglia, preparation
+
+```{r}
+con.tmp <- qread("cao_micro_pvm.qs", nthreads = 10)$data.object
+anno <- qread("anno_micro_pvm.qs")
+
+cm.raw.all <- con.tmp$getJointCountMatrix(raw = T) %>% 
+  Matrix::t() %>% 
+  .[!grepl("MT-|RPS|RPL", rownames(.)), ]
+
+meta.all <- con.tmp$getDatasetPerCell() %>% 
+  data.frame(donors = .) %>% 
+  mutate(ctypes = anno[rownames(.)] %>% unname()) %>% 
+  .[complete.cases(.), ]
+
+metadata.all <- read.delim("metadata.tsv")
+
+for (cc in colnames(metadata.all)[-1]) {
+  meta.all[[cc]] <- metadata.all[[cc]][match(meta.all$donors, metadata.all$sample)]
+}
+
+# Convert integers to numeric
+meta.all$age %<>% as.numeric()
+meta.all$disease_duration %<>% as.numeric()
+```
+
+### CTRL vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "PD") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "PD")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw %>% .[, colnames(.) %in% rownames(meta)], 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=3,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var', 
+                               vargenes_thresh=500,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(3,7),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+factors <- c('sex','pmi', "age", "flowcell", "extract")
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test = factors, 
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars= factors,
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### CTRL vs PD
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "MSA") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "MSA")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=3,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var', 
+                               vargenes_thresh=500,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(4,10),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### PD vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "CTRL") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "CTRL")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=3,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var', 
+                               vargenes_thresh=500,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(4,10),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), 
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), 
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### Oligodendrocytes, preparation
+
+```{r}
+con.tmp <- qread("con_oligodendrocytes.qs", nthreads = 10)
+anno <- qread("anno_oligo.qs")
+
+cm.raw.all <- con.tmp$getJointCountMatrix(raw = T) %>%
+  .[rownames(.) %in% names(anno), !grepl("MT-|RPS|RPL", colnames(.))] %>% 
+  Matrix::t()
+
+meta.all <- con.tmp$getDatasetPerCell() %>% 
+  data.frame(donors = .) %>% 
+  mutate(ctypes = anno[rownames(.)] %>% unname()) %>% 
+  .[complete.cases(.), ]
+
+metadata.all <- read.delim("metadata.tsv")
+
+for (cc in colnames(metadata.all)[-1]) {
+  meta.all[[cc]] <- metadata.all[[cc]][match(meta.all$donors, metadata.all$sample)]
+}
+
+# Convert integers to numeric
+meta.all$age %<>% as.numeric()
+meta.all$disease_duration %<>% as.numeric()
+```
+
+### CTRL vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "PD") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "PD")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw %>% .[, colnames(.) %in% rownames(meta)], 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=0.05,
+                               scale_var = TRUE, 
+                               var_scale_power = 1) # Diminishable effect at 0.5, but not on any other level
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(6,9),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### CTRL vs PD
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "MSA") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "MSA")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=.05,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(4,8),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), 
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### PD vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "CTRL") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "CTRL")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=.05,
+                               scale_var = TRUE, 
+                               var_scale_power = 1) # Diminishable effect at 0.5, but not on any other level
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(5,6),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), 
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"), 
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### OPCs, preparation
+
+```{r}
+con.tmp <- qread("con_opcs.qs", nthreads = 10)
+anno <- qread("anno_opc.qs")
+
+cm.raw.all <- con.tmp$getJointCountMatrix(raw = T) %>% 
+  Matrix::t() %>% 
+  .[!grepl("MT-|RPS|RPL", rownames(.)), ]
+
+meta.all <- con.tmp$getDatasetPerCell() %>% 
+  data.frame(donors = .) %>% 
+  mutate(ctypes = anno[rownames(.)] %>% unname()) %>% 
+  .[complete.cases(.), ]
+
+metadata.all <- read.delim("metadata.tsv")
+
+for (cc in colnames(metadata.all)[-1]) {
+  meta.all[[cc]] <- metadata.all[[cc]][match(meta.all$donors, metadata.all$sample)]
+}
+
+# Convert integers to numeric
+meta.all$age %<>% as.numeric()
+meta.all$disease_duration %<>% as.numeric()
+```
+
+### CTRL vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "PD") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "PD")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw %>% .[, colnames(.) %in% rownames(meta)], 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=0.2,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5) # Diminishable effect at 2, but not on any other level
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(4,5),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### CTRL vs PD
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "MSA") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "MSA")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=.4,
+                               scale_var = TRUE, 
+                               var_scale_power = 1) # No effect at 0.5, but 1, 1.5, 2
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(4,6),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+### PD vs MSA
+
+```{r}
+meta <- meta.all %>% 
+  filter(condition != "CTRL") %>% 
+  mutate(donors = factor(donors),
+         ctypes = factor(ctypes))
+
+metadata <- metadata.all %>% 
+  filter(condition != "CTRL")
+
+cm.raw <- cm.raw.all %>% 
+  .[, colnames(.) %in% rownames(meta)]
+
+# set up project parameters
+param_list <- initialize_params(ctypes_use = meta$ctypes %>% levels(),
+                                ncores = 31, 
+                                rand_seed = 10)
+
+# create project container
+itd_container <- make_new_container(count_data=cm.raw, 
+                                    meta_data=meta,
+                                    params=param_list,
+                                    label_donor_sex = F)
+
+itd_container %<>% form_tensor(donor_min_cells=5,
+                               norm_method='trim', 
+                               scale_factor=10000,
+                               vargenes_method='norm_var_pvals', 
+                               vargenes_thresh=.4,
+                               scale_var = TRUE, 
+                               var_scale_power = 0.5)
+
+print(length(itd_container[["all_vargenes"]]))
+```
+
+```{r}
+itd_container %<>% run_tucker_ica(ranks=c(5,6),
+                                  tucker_type = 'regular', 
+                                  rotation_type = 'hybrid')
+
+# get donor scores-metadata associations
+itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                         stat_use='pval')
+
+# plot donor scores
+itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "brain_bank", "flowcell", "extract"),
+                                     show_donor_ids = TRUE,
+                                     add_meta_associations='pval')
+
+# show the donor scores heatmap
+p <- itd_container$plots$donor_matrix
+
+p
+```
+
+```{r, echo = F}
+rm(con.tmp, cm.raw.all, itd_container)
+gc()
+```
+
+# Extended Data Figure 6
+
+We're calculating cosine similarities to annotated data from [Garma et al.](https://www.nature.com/articles/s41467-024-50414-w). The data are available [here](https://figshare.com/articles/dataset/Raw_and_processed_snRNA-seq_counts_matrices_from_human_striatal_interneurons/22340140).
+
+## Prepare data
+
+Here, we're showing how we prepared the data. This will not be run again. 
+
+```{r, eval = F}
+lp.raw <- loomR::connect("Interneurons_raw.loom", mode = "r+", skip.validate = T)
+
+cm.raw <- lp.raw[["matrix"]][,] %>% 
+  `dimnames<-`(list(
+    lp.raw[["col_attrs/obs_names"]][], 
+    lp.raw[["row_attrs/var_names"]][]
+    ))
+
+lp.raw$close()
+
+lp.norm <- loomR::connect("Interneurons_processed.loom", mode = "r+", skip.validate = T)
+
+anno <- setNames(
+  lp.norm$col.attrs$`IN subclass`[],
+  lp.norm$col.attrs$obs_names[]
+) %>% 
+  factor()
+  
+spc <- setNames(
+  lp.norm$col.attrs$sample[],
+  lp.norm$col.attrs$obs_names[]
+) %>% 
+  factor()
+
+origin <- setNames(
+  lp.norm$col.attrs$Origin[],
+  lp.norm$col.attrs$obs_names[]
+) %>% 
+  factor()
+
+area <- setNames(
+  lp.norm$col.attrs$Region[],
+  lp.norm$col.attrs$obs_names[]
+) %>% 
+  factor()
+
+sex <- setNames(
+  lp.norm$col.attrs$Sex[],
+  lp.norm$col.attrs$obs_names[]
+) %>% 
+  factor()
+
+umap <- `rownames<-`(lp.norm$col.attrs$X_umap[,] %>% t(),
+                     lp.norm$col.attrs$obs_names[])
+
+lp.norm$close()
+```
+
+Then, we need to prepare a Conos object of those data. This will not be run here.
+
+```{r, eval = F}
+preprocessed <- spc %>%
+  split(names(.), .) %>%
+  .[sapply(., length) > 50] %>%
+  lapply(\(cid) cm.raw[cid, ]) %>%
+  lapply(Matrix::t) %>%
+  lapply(basicP2proc, get.largevis = F, get.tsne = F, make.geneknn = F, n.cores = 20)
+
+con <- Conos$new(preprocessed, n.cores = 32)
+con$embeddings$PCA$UMAP <- umap
+con$embedding <- umap
+con$clusters$leiden$groups <- anno
+con$clusters$sex$groups <- sex
+con$clusters$area$groups <- area
+con$clusters$origin$groups <- origin
+con$clusters$spc$groups <- spc
+
+qsave(con, "con_garma.qs", nthreads = 10)
+```
+
+## 6a
+
+```{r}
+# Our data
+rydbirk.neurons.anno <- qread("anno_neurons.qs") %>% 
+  factor(labels = paste("Rydbirk", levels(.), sep = "-"))
+
+rydbirk.neurons <- qread("cao_neurons.qs", nthreads = 10)$data.object
+
+rydbirk.neurons.pseudo <- rydbirk.neurons$getJointCountMatrix(raw = T) %>%
+  sccore::collapseCellsByType(groups = rydbirk.neurons.anno, min.cell.count = 1) %>% 
+  t() %>%
+  apply(2, as, "integer")
+
+rydbirk.neurons.pseudo %<>% 
+  DESeq2::DESeqDataSetFromMatrix(., 
+                                 colnames(.) %>% 
+                                   strsplit("-") %>% 
+                                   sget(1) %>% 
+                                   data.frame() %>% 
+                                   `dimnames<-`(list(colnames(rydbirk.neurons.pseudo), "group")), 
+                                 design = ~ 1) %>% 
+  DESeq2::estimateSizeFactors() %>% 
+  DESeq2::counts(normalized = T)
+
+# Garma data
+con.garma <- qread("con_garma.qs", nthreads = 10)
+
+garma.neurons.anno <- con.garma$clusters$anno$groups %>% 
+  factor() %>% 
+  factor(labels = paste("Garma", levels(.), sep = "-"))
+
+garma.neurons.pseudo <- con.garma$getJointCountMatrix(raw = T) %>% 
+  sccore::collapseCellsByType(groups = garma.neurons.anno, min.cell.count = 1) %>%
+  t() %>%
+  apply(2, as, "integer")
+
+garma.neurons.pseudo %<>%
+  DESeq2::DESeqDataSetFromMatrix(.,
+                                 colnames(.) %>%
+                                   strsplit("_") %>%
+                                   sget(1) %>%
+                                   data.frame() %>%
+                                   `dimnames<-`(list(colnames(garma.neurons.pseudo), "group")),
+                                 design = ~ 1) %>%
+  DESeq2::estimateSizeFactors() %>%
+  DESeq2::counts(normalized = T)
+
+# We rotate Garma into Rydbirk sample PCA space
+cm.rydbirk <- rydbirk.neurons.pseudo %>% 
+  as.data.frame() %>%
+  filter(rowSums(.) > 0)
+cm.garma <- garma.neurons.pseudo %>% 
+  as.data.frame() %>%
+  filter(rowSums(.) > 0)
+
+genesToKeep <- conos:::getOdGenesUniformly(append(con.garma$samples, rydbirk.neurons$samples), 50) %>%
+  intersect(rownames(cm.rydbirk)) %>% 
+  intersect(rownames(cm.garma))
+
+pc.res <-
+  cm.rydbirk[genesToKeep, ] %>%
+  t() %>%
+  prcomp(center = T,
+         scale = T)
+
+pc.tmp <- cm.garma[genesToKeep, ] %>%
+  as.data.frame() %>%
+  filter(rowSums(.) > 0) %>%
+  t() %>%
+  scale(pc.res$center, pc.res$scale) %*% pc.res$rotation
+```
+
+```{r, fig.width=9, fig.height=9}
+dat.plot <- rbind(pc.res$x, pc.tmp) %>%
+  data.frame() %>% 
+  mutate(id = rownames(.)) %>% 
+  mutate(study = ifelse(grepl("Rydbirk", id), "Rydbirk", "Garma") %>% factor(),
+         anno = strsplit(id, "-") %>% sget(2))
+
+lsa::cosine(dat.plot %>% 
+              select(-id, -study, -anno) %>%
+              t()) %>%
+  reshape2::melt() %>% 
+  ggplot(aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "skyblue3", mid = "white", high = "deeppink3") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  labs(title = "Top 50 OD genes, Garma PCA rotation into Rydbirk PCA space")
+```
+
+## 6b
+
+```{r, fig.width=10, fig.height=8}
+cm.garma.raw <- con.garma$getJointCountMatrix(raw = T)
+cm.rydbirk.raw <- rydbirk.neurons$getJointCountMatrix(raw = T)
+
+idx <- intersect(colnames(cm.garma.raw), colnames(cm.rydbirk.raw))
+
+cm.garma.ext <- cm.garma.raw %>% 
+  sccore:::extendMatrix(idx)
+cm.rydbirk.ext <- cm.rydbirk.raw %>% 
+  sccore:::extendMatrix(idx)
+
+cm.comb <- rbind(cm.garma.ext, cm.rydbirk.ext)
+anno.comb <- c(garma.neurons.anno %>% .[names(.) %in% rownames(cm.comb)], rydbirk.neurons.anno %>% .[names(.) %in% rownames(cm.comb)]) %>% 
+  factor()
+
+cm.comb %<>% .[rownames(.) %in% names(anno.comb), ]
+
+unique(
+  c("GAD1","GAD2","PPP1R1B","SLC17A7","CHAT","CALB2","DCC","ID2","MEIS2","ST18","NKX2-1","NR2F2","PAX6","PVALB","RXFP1","SST","VIP","RELN","SATB2","DRD1","DRD2","FOXP2", "LRP8", "VLDLR") %>% 
+  c("CCK", "VIP", "CXCL14", "CHAT", "PTHLH", "MOXD1", "CHST9", "TAC3", "SST", "NPY", "PVALB", "GRIK3", "DACH1", "GAD1", "GAD2")
+) %>% 
+  sccore::dotPlot(cm.comb, anno.comb) + scale_color_gradient(low = "grey80", high = "firebrick")
+```
+
+```{r, echo = F}
+rm(con.garma, cm.garma.ext, cm.garma.raw, cm.garma)
+gc()
+```
+
+# Extended Data Figure 7
+
+## Prepare data
+
+We're calculating cosine similarities to annotated data from [Kamath et al.](https://www.nature.com/articles/s41593-022-01061-1). The data are available [here](https://singlecell.broadinstitute.org/single_cell/study/SCP1768/single-cell-genomic-profiling-of-human-dopamine-neurons-identifies-a-population-that-selectively-degenerates-in-parkinsons-disease-single-nuclei-data).
+
+```{r, eval = F}
+cm <- Matrix::readMM("GSE178265_Homo_matrix.mtx") %>% 
+  `dimnames<-`(list(
+    read.delim("GSE178265_Homo_features.tsv", header = F)$V1,
+    read.delim("GSE178265_Homo_bcd.tsv", header = F)$V1
+  ))
+
+metadata.raw <- read.delim("METADATA_PD.tsv", header = T)[-1, ]
+
+cells.to.omit <- metadata.raw %>% 
+  filter(donor_id %in% c("NIH1", "Rat1", "TreeShrew1")) %>% 
+  pull(NAME)
+
+meta.per.cell <- metadata.raw %>% 
+  filter(!NAME %in% cells.to.omit)
+
+meta.per.sample <- metadata.raw %>% 
+  filter(!NAME %in% cells.to.omit) %>% 
+  select(-NAME, -libname, -biosample_id) %>% 
+  mutate(area = grepl.replace(organ__ontology_label, c("substantia nigra pars compacta", "caudate nucleus"), c("SN", "CN"))) %>% 
+  mutate(donor_area = paste(donor_id, area, sep = "-")) %>% 
+  .[match(unique(.$donor_area), .$donor_area), ]
+
+cids.per.donor.area <- meta.per.cell %>% 
+  mutate(area = grepl.replace(organ__ontology_label, c("substantia nigra pars compacta", "caudate nucleus"), c("SN", "CN"))) %>% 
+  mutate(donor_area = paste(donor_id, area, sep = "-")) %$% 
+  split(NAME, donor_area)
+
+cm.list <- meta %>%
+  sccore::plapply(\(mm) cm[, colnames(cm) %in% rownames(mm)], n.cores = 7)
+
+cm.area.donor <- cm.list %>%
+  lapply(\(area) sccore::plapply(cids.per.donor.area, \(cid) area[, colnames(area) %in% cid], n.cores = 22)) %>%
+  lapply(\(cms) cms[sapply(cms, ncol) > 30]) %>%
+  lapply(lapply, as, "CsparseMatrix") %>%
+  lapply(lapply, basicP2proc, get.largevis = F, get.tsne = F, make.geneknn = F, n.cores = 20)
+```
+
+```{r, echo = F}
+cm.area.donor <- qread("cm_area_donor.qs", nthreads = 10)
+```
+
+```{r}
+# Annotations
+embeddings <- dir(pattern = "UMAP")
+
+embeddings %<>% 
+  lapply(\(type) read.delim(type, header = T, row.names = 1)) %>% 
+  setNames(embeddings %>% strsplit("_") %>% sget(1)) %>% 
+  lapply(dplyr::rename, subtype = Cell_Type)
+
+con.list <- names(embeddings) %>% 
+  lapply(\(nn) {
+    con <- Conos$new(cm.area.donor[[nn]], n.cores = 32)
+    con$embeddings <- list(UMAP = embeddings[[nn]][, -3])
+    con$embedding <- con$embeddings[[1]]
+    con$clusters <- list(leiden = list(groups = embeddings[[nn]] %>% {setNames(pull(., subtype), rownames(.))}))
+    
+    return(con)
+  }) %>% 
+  setNames(names(embeddings))
+```
+
+```{r, echo = F}
+rm(cm.area.donor)
+gc()
+```
+
+## Plot
+
+```{r}
+# Our data
+rydbirk.neurons.anno <- qread("anno_neurons.qs") %>% 
+  factor(labels = paste("Rydbirk", levels(.), sep = "-"))
+
+rydbirk.neurons <- qread("cao_neurons.qs", nthreads = 10)$data.object
+
+rydbirk.neurons.pseudo <- rydbirk.neurons$getJointCountMatrix(raw = T) %>%
+  sccore::collapseCellsByType(groups = rydbirk.neurons.anno, min.cell.count = 1) %>% 
+  t() %>%
+  apply(2, as, "integer")
+
+rydbirk.neurons.pseudo %<>% 
+  DESeq2::DESeqDataSetFromMatrix(., 
+                                 colnames(.) %>% 
+                                   strsplit("-") %>% 
+                                   sget(1) %>% 
+                                   data.frame() %>% 
+                                   `dimnames<-`(list(colnames(rydbirk.neurons.pseudo), "group")), 
+                                 design = ~ 1) %>% 
+  DESeq2::estimateSizeFactors() %>% 
+  DESeq2::counts(normalized = T)
+
+# Kamath data
+kamath.neurons.anno1 <- con.list$da$clusters$leiden$groups %>% 
+  factor() %>% 
+  factor(labels = paste("Kamath", levels(.), sep = "-"))
+
+kamath.neurons.anno2 <- con.list$nonda$clusters$leiden$groups %>% 
+  factor() %>% 
+  factor(labels = paste("Kamath", levels(.), sep = "-"))
+
+kamath.neurons.anno <- factor(c(kamath.neurons.anno1, kamath.neurons.anno2))
+
+
+kamath.cm1 <- con.list$da$getJointCountMatrix(raw = T)
+kamath.cm2 <- con.list$nonda$getJointCountMatrix(raw = T)
+
+kamath.neurons.pseudo <- rbind(kamath.cm1, kamath.cm2) %>%
+  sccore::collapseCellsByType(groups = kamath.neurons.anno, min.cell.count = 1) %>%
+  t() %>%
+  apply(2, as, "integer")
+
+kamath.neurons.pseudo %<>%
+  DESeq2::DESeqDataSetFromMatrix(.,
+                                 colnames(.) %>%
+                                   strsplit("_") %>%
+                                   sget(1) %>%
+                                   data.frame() %>%
+                                   `dimnames<-`(list(colnames(kamath.neurons.pseudo), "group")),
+                                 design = ~ 1) %>%
+  DESeq2::estimateSizeFactors() %>%
+  DESeq2::counts(normalized = T)
+
+# We rotate Kamath into Rydbirk sample PCA space
+cm.rydbirk <- rydbirk.neurons.pseudo %>% 
+  as.data.frame() %>%
+  filter(rowSums(.) > 0)
+cm.kamath <- kamath.neurons.pseudo %>% 
+  as.data.frame() %>%
+  filter(rowSums(.) > 0)
+```
+
+```{r, fig.width=9, fig.height=8}
+genesToKeep <- conos:::getOdGenesUniformly(append(con.list$da$samples, rydbirk.neurons$samples) %>% append(con.list$nonda$samples), 100) %>% 
+  intersect(rownames(cm.rydbirk)) %>% 
+  intersect(rownames(cm.kamath))
+
+pc.res <-
+  cm.rydbirk[genesToKeep, ] %>%
+  t() %>%
+  prcomp(center = T,
+         scale = T)
+
+pc.tmp <- cm.kamath[genesToKeep, ] %>%
+  as.data.frame() %>%
+  filter(rowSums(.) > 0) %>%
+  t() %>%
+  scale(pc.res$center, pc.res$scale) %*% pc.res$rotation
+
+# Plot
+dat.plot <- rbind(pc.res$x, pc.tmp) %>%
+  data.frame() %>% 
+  mutate(id = rownames(.)) %>% 
+  mutate(study = ifelse(grepl("Rydbirk", id), "Rydbirk", "Kamath") %>% factor(),
+         anno = strsplit(id, "-") %>% sget(2))
+
+lsa::cosine(dat.plot %>% 
+              select(-id, -study, -anno) %>% 
+              t()) %>%
+  reshape2::melt() %>% 
+  ggplot(aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "skyblue3", mid = "white", high = "deeppink3") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  labs(title = "Top 100 OD genes, Kamath PCA rotation into Rydbirk PCA space")
+```
+
+```{r, echo = F}
+rm(cm.kamath, kamath.cm1, kamath.cm2, rydbirk.neurons, cm.rydbirk, cm.rydbirk.raw)
+gc()
+```
+
+# Extended Data Figure 8
+
+Here, we use public data from [Smajic *et al*.](https://academic.oup.com/brain/article/145/3/964/6469020). We isolated neurons and used the available annotation (IPDCO_hg_midbrain_cell.tsv).
+
+```{r, fig.width=8, fig.height=12}
+con.smajic <- qread("smajic_neurons.qs", nthreads = 10)
+con.neurons <- qread("cao_neurons.qs", nthreads = 10)$data.object
+
+# Get Smajic annotation
+tmp <- data.frame(cid = rownames(con.smajic$embedding)) %>% 
+  mutate(barcode = strsplit(cid, "_") %>% 
+           sget(3))
+
+anno <- data.table::fread("IPDCO_hg_midbrain_cell.tsv", header = T) %>% 
+  mutate(barcode = strsplit(barcode, "_") %>% 
+           sget(1)) %>% 
+  mutate(cid = tmp$cid[match(barcode, tmp$barcode)]) %>% 
+  filter(!is.na(cid)) %>% 
+  pull(cell_ontology, cid) %>%
+  .[!. %in% c("Astrocytes", "Endothelial cells", "Ependymal", "Microglia", "Oligodendrocytes", "OPCs", "Pericytes")] %>% 
+  factor()
+  
+cowplot::plot_grid(plotlist = list(
+  con.smajic$plotGraph(groups = anno, title = "Smajic neurons, annotation", font.size = 3, shuffle.colors = T, plot.na = F) + theme(line = element_blank()),
+  con.neurons$plotGraph(groups = anno.neurons, title = "Rydbirk neurons, annotation", font.size = 3) + theme(line = element_blank()),
+  con.smajic$plotGraph(groups = anno, gene = "RELN", title = "RELN expression", plot.na = F) + theme(line = element_blank()),
+  con.neurons$plotGraph(gene = "RELN", title = "RELN expression", plot.na = F) + theme(line = element_blank()),
+  con.smajic$plotGraph(groups = anno, gene = "CADPS2", title = "CADPS2 expression", plot.na = F) + theme(line = element_blank()),
+  con.neurons$plotGraph(gene = "CADPS2", title = "CADPS2 expression", plot.na = F) + theme(line = element_blank())), 
+  nrow = 3)
+```
+
+```{r, echo = F}
+rm(con.smajic, con.neurons)
+gc()
+```
+
+# Extended Data Figure 10
 
 ```{r}
 cm.merged <- con$getJointCountMatrix(raw = T) %>% 
@@ -2044,7 +3691,7 @@ c("TSPO", "COQ2", "MAPT", "FBXO47", "ELOVL7", "EDN1", "GAB1", "TENM2", "RABGEF1"
   cowplot::plot_grid(plotlist = ., ncol = 3)
 ```
 
-# Extended Data Figures 6 & 8
+# Extended Data Figures 11 & 12
 
 ## Load and prepare data
 
@@ -2069,7 +3716,7 @@ sds <- as.SlingshotDataSet(sds_obj)
 pseudotime <- sds_obj@assays@data@listData$pseudotime[, 1]
 ```
 
-## 6a
+## 11a
 
 ```{r, fig.width=6, fig.height=4}
 plot.df <- cao$data.object$embedding %>% 
@@ -2095,7 +3742,7 @@ cao$data.object$embedding %>%
   labs(col = "Pseudotime", x = "UMAP1", y = "UMAP2")# +
 ```
 
-## 6b
+## 11b
 
 Here, we show the code for running the generalized additive mixed model. It takes a significant amount of time to run, we provide data in `pseudotime_micro_l1.qs`.
 
@@ -2122,8 +3769,6 @@ mt <- mat %>%
 ```
 
 ```{r, eval = F}
-library(gamm4)
-
 res <- mt %>% 
   sccore::plapply(\(x) {
     fit_full <- gamm4(data = x, formula = value ~ s(pseudotime, by = factor(condition)), random = ~(1 | sample), REML = F)
@@ -2191,7 +3836,7 @@ Heatmap(Smooth,
         row_names_gp = grid::gpar(fontsize = 5))
 ```
 
-## 8
+## 12
 
 ```{r, fig.height=40, fig.width=20}
 cpc <- pseudotime %>% 
@@ -2212,9 +3857,56 @@ res.filter %>%
   facet_wrap(~gene, ncol = 5, scales = "free")
 ```
 
-# Extended Data Figure 9
+# Extended Data Figure 14
 
-## 9a
+Here, we use public data from [Feleke *et al*.](https://link.springer.com/article/10.1007/s00401-021-02343-x). We isolated microglia based on CSF1R expression and performed a quick annotation using AIF1 expression to identify activated microglia.
+
+```{r, fig.width=8, fig.height=8}
+con.micro <- qread("feleke_micro.qs")
+
+anno.micro <- getConosCluster(con.micro) %>% 
+  factor(labels = c("Cluster1", "Activated", "Cluster2", "Cluster2"))
+
+# We set sample groups manually as it can't be inferred from sample names
+sample.groups <- c("CTRL", "CTRL", "DLB", "DLB", "DLB", "DLB", "DLB", "PDD", "PDD", "PD", "PDD", "PD", "PDD", "PD", "PDD", "PDD", "DLB", "PD", "PDD", "PD", "DLB", "PD", "PD", "CTRL", "CTRL", "CTRL", "CTRL", "CTRL") %>% 
+  setNames(names(con.micro$samples))
+```
+
+```{r, fig.width=4, fig.height=4}
+con.clone <- con.micro$clone()
+con.clone$samples <- con.micro$samples %>% .[which(sample.groups %in% c("CTRL", "PD"))]
+
+sample.groups.clone <- sample.groups %>% .[. %in% c("CTRL", "PD")]
+cao <- Cacoa$new(con.clone, sample.groups = sample.groups.clone, ref.level = "CTRL", target.level = "PD", cell.groups = anno.micro, n.cores = 32)
+
+p <- cao$plotCellGroupSizes() + theme(line = element_blank())
+p
+```
+
+```{r, fig.width=4, fig.height=4}
+cao$estimateCellLoadings()
+p <- cao$plotCellLoadings()
+p
+```
+
+```{r, fig.width=4, fig.height=4}
+p <- con.clone$plotGraph(size = 0.3, groups = anno.micro, font.size = 5) + theme(line = element_blank())
+p
+```
+
+```{r, fig.width=4, fig.height=4}
+p <- con.clone$plotGraph(gene = "AIF1", title = "AIF1", plot.na = F) + theme(line = element_blank())
+p
+```
+
+```{r, echo = F}
+rm(con.clone, con.micro, cao)
+gc()
+```
+
+# Extended Data Figure 15
+
+## 15a
 
 We provide the results output from scHLAcount in `scHLAcount.zip`.
 
@@ -2519,7 +4211,7 @@ cell.anno.df %>%
   data.frame()
 ```
 
-## 9b
+## 15b
 
 We provide a curated list with MHC and cytokine genes. Please note, the order of clusters may change.
 
@@ -2634,9 +4326,9 @@ ComplexHeatmap::Heatmap(cm.pseudo,
                         row_km = 4)
 ```
 
-# Extended Data Figure 10
+# Extended Data Figure 16
 
-## 10c
+## 16c
 
 ```{r, fig.width=14, fig.height=6}
 c("FOSL2", "TCF4", "STAT1", "NR3C1", "ETV7", "THRB", "BPTF", "RELB", "CEBPD", "HIF1A", "ELF1", "CREM", "ELF2", "ZNF44", "CHD1", "POU2F1", "GTF2IRD1", "NFIA", "NFE2L2", "FOXP1", "FOXO3") %>% 
@@ -2646,9 +4338,9 @@ c("FOSL2", "TCF4", "STAT1", "NR3C1", "ETV7", "THRB", "BPTF", "RELB", "CEBPD", "H
   scale_fill_manual(values = brewer.pal(6, "Greys")[-1])
 ```
 
-# Extended Data Figure 11
+# Extended Data Figure 17
 
-## 11a
+## 17a
 
 We provide the results from scDRS based on Nalls *et al.* GWAS summary stats. For calculation of these, see `scDRS_PD.ipynb`.
 
@@ -2725,9 +4417,9 @@ data.frame(cell = dat.scores$X,
   geom_hline(yintercept = 0)
 ```
 
-## 11b
+## 17b
 
-```{r, fig.height=4, fig.width=3.5}
+```{r, fig.height=4, fig.width=3.5, message=TRUE, warning=TRUE}
 dat.ct <- read.delim("gwas/nalls/downstream_celltype_microglia.tsv", header = F, sep = "\t") %$%  
   strsplit(V1, " ") %>% 
   unlist() %>% 
@@ -2777,7 +4469,7 @@ data.frame(cell = dat.scores$X %>% gsub("one_", "!!", .),
   scale_fill_manual(values = pal.major)
 ```
 
-## 11c
+## 17c
 
 We provide the results from scDRS based on Chia *et al.* GWAS summary stats. For calculation of these, see `scDRS_MSA.ipynb`.
 
@@ -2852,9 +4544,418 @@ data.frame(cell = dat.scores$X,
   geom_hline(yintercept = 0)
 ```
 
-# Extended Data Figure 12
+# Extended Data Figure 18
 
 All subfigures were made in GraphPad Prism. Data are available in `Phagocytosis_assay_triplicates_raw_data_HH.tsv` (Copenhagen experiment) or `HOUSTON.tsv` (Houston experiment).
+
+# Extended Data Table 2
+
+Not rerun
+
+```{r, eval = F}
+anno.major <- qread("anno_major.qs")
+
+anno.micro <- qread("anno_micro_pvm.qs") %>% 
+  renameAnnotation("Steady-state","MIC_steady-state") %>% 
+  renameAnnotation("Intermediate1","MIC_intermediate1") %>% 
+  renameAnnotation("Intermediate2","MIC_intermediate2") %>% 
+  renameAnnotation("Activated","MIC_activated")
+
+anno.glia <- c("anno_astro.qs",
+               "anno_oligo.qs",
+               "anno_opc.qs") %>% 
+  lapply(qread) %>% 
+  Reduce(c, .) %>% 
+  factor() %>% 
+  renameAnnotation("Homeostatic_astrocytes", "AS_homeostatic") %>% 
+  renameAnnotation("Reactive_astrocytes", "AS_reactive") %>% 
+  renameAnnotation("Homeostatic_LINC01608", "OL_LINC01608") %>%
+  renameAnnotation("Homeostatic_SLC5A11", "OL_SLC5A11") %>% 
+  renameAnnotation("Reactive_SCGZ", "OL_SGCZ")
+
+anno.neurons <- qread("anno_neurons.qs")
+
+# Minor final
+anno.minor <- anno.major[!anno.major %in% c("Inh. neurons", "Exc. neurons", "PVMs", "Astrocytes", "Oligodendrocytes", "OPCs", "Microglia")] %>% 
+  {factor(c(., anno.neurons, anno.glia, anno.micro))} %>% 
+  factor(levels = sort(levels(.)))
+
+# Major final
+anno.major %<>% .[!names(.) %in% names(anno.neurons)] %>% 
+  {factor(c(., anno.neurons))} %>% 
+  collapseAnnotation("MSN") %>% 
+  collapseAnnotation("GABAergic") %>% 
+  collapseAnnotation("GLUergic") %>% 
+  renameAnnotation("MSN", "Medium spiny neurons") %>% 
+  renameAnnotation("GABAergic", "GABAergic neurons") %>% 
+  renameAnnotation("GLUergic", "GLUergic neurons") %>% 
+  factor(levels = sort(levels(.)))
+```
+
+```{r, eval = F}
+con.major$n.cores <- 32 # Major object
+markers.major <- con.major$getDifferentialGenes(groups = anno.major, 
+                                                z.threshold = 1, 
+                                                upregulated.only = T, 
+                                                append.specificity.metrics = T, 
+                                                append.auc = T)
+
+markers.major %>% 
+  lapply(filter, PAdj <= 0.05) %>% 
+  bind_rows(.id = "Celltype") %>% 
+  write.table("Table SX - Celltype markers, major annotation.tsv", sep = "\t", dec = ".", row.names = F)
+```
+
+# Extended Data Table 3
+
+Not rerun
+
+```{r, eval = F}
+res <- list(
+  Major = list(CTRLvsMSA = "cao_major_msa.qs",
+               CTRLvsPD = "cao_major_pd.qs",
+               PDvsMSA = "cao_major_dis.qs"),
+  Neurons = list(CTRLvsMSA = "cao_neurons_msa.qs",
+                 CTRLvsPD = "cao_neurons_pd.qs",
+                 PDvsMSA = "cao_neurons_dis.qs"),
+  Glial = list(CTRLvsMSA = "cao_oligo_astro_opc_msa.qs",
+               CTRLvsPD = "cao_oligo_astro_opc_pd.qs",
+               PDvsMSA = "cao_oligo_astro_opc_dis.qs"),
+  Micro_PVM = list(CTRLvsMSA = "cao_micro_pvm_msa.qs",
+                   CTRLvsPD = "cao_micro_pvm_pd.qs",
+                   PDvsMSA = "cao_micro_pvm_dis.qs")) %>% 
+  lapply(\(celltype) sccore::plapply(celltype, \(comp) qread(comp, nthreads = 10)$test.results$coda, n.cores = 3)) %>% 
+  lapply(lapply, \(x) data.frame(subtype = names(x$padj),
+                                 loadings.min = apply(x$loadings, 1, min),
+                                 loadings.median = apply(x$loadings, 1, median),
+                                 loadings.max = apply(x$loadings, 1, max),
+                                 padj = unname(x$padj))) %>% 
+  lapply(bind_rows, .id = "Comparison") %>% 
+  bind_rows(.id = "Cell type") %>% 
+  `rownames<-`(NULL)
+
+res %>% 
+  write.table("Table SX - Loadings.tsv", sep = "\t", dec = ".", row.names = F)
+```
+
+# Extended Data Table 4
+
+Not rerun
+
+```{r, eval = F}
+cao <- Cacoa$new(data.object = con, # Major object
+                 cell.groups = anno.major, 
+                 ref.level = "CTRL", 
+                 target.level = "DISEASE", 
+                 sample.groups = con$samples %>% 
+                   names() %>% 
+                   strsplit("_") %>% 
+                   sget(1) %>%
+                   {ifelse(. == "CTRL", "CTRL", "DISEASE")} %>% 
+                   `names<-`(con$samples %>% 
+                               names()),
+                 sample.groups.palette = c(c("yellow", RColorBrewer::brewer.pal(n = 6, "Accent")[5:6]) %>% setNames(c("CTRL","PD","MSA"))))
+
+cao$sample.groups <- con$samples %>% 
+  names() %>% 
+  strsplit("_") %>% 
+  sget(1) %>% 
+  `names<-`(con$samples %>% 
+              names())
+
+res <- cao$plotCellGroupSizes(show.significance = TRUE, 
+                              filter.empty.cell.types = FALSE)$data %>% 
+  group_by(group, variable) %>% 
+  summarize(Min_proportion = min(value),
+            Mean_proportion = mean(value),
+            Max_proportion = max(value)) %>% 
+  dplyr::rename(Condition = group,
+                Celltype = variable)
+
+res %>% 
+  write.table("Table SX - Proportions, major annotation.tsv", sep = "\t", dec = ".", row.names = F)
+```
+
+# Extended Data Table 5
+
+Not rerun
+
+```{r, eval = F}
+anno.major <- qread("anno_major.qs")
+
+anno.micro <- qread("anno_micro_pvm.qs") %>% 
+  renameAnnotation("Steady-state","MIC_steady-state") %>% 
+  renameAnnotation("Intermediate1","MIC_intermediate1") %>% 
+  renameAnnotation("Intermediate2","MIC_intermediate2") %>% 
+  renameAnnotation("Activated","MIC_activated")
+
+anno.glia <- c("anno_astro.qs",
+               "anno_oligo.qs",
+               "anno_opc.qs") %>% 
+  lapply(qread) %>% 
+  Reduce(c, .) %>% 
+  factor() %>% 
+  renameAnnotation("Homeostatic_astrocytes", "AS_homeostatic") %>% 
+  renameAnnotation("Reactive_astrocytes", "AS_reactive") %>% 
+  renameAnnotation("Homeostatic_LINC01608", "OL_LINC01608") %>%
+  renameAnnotation("Homeostatic_SLC5A11", "OL_SLC5A11") %>% 
+  renameAnnotation("Reactive_SCGZ", "OL_SGCZ")
+
+anno.neurons <- qread("anno_neurons.qs")
+
+# Minor final
+anno.minor <- anno.major[!anno.major %in% c("Inh. neurons", "Exc. neurons", "PVMs", "Astrocytes", "Oligodendrocytes", "OPCs", "Microglia")] %>% 
+  {factor(c(., anno.neurons, anno.glia, anno.micro))} %>% 
+  factor(levels = sort(levels(.)))
+
+# Major final
+anno.major %<>% .[!names(.) %in% names(anno.neurons)] %>% 
+  {factor(c(., anno.neurons))} %>% 
+  collapseAnnotation("MSN") %>% 
+  collapseAnnotation("GABAergic") %>% 
+  collapseAnnotation("GLUergic") %>% 
+  renameAnnotation("MSN", "Medium spiny neurons") %>% 
+  renameAnnotation("GABAergic", "GABAergic neurons") %>% 
+  renameAnnotation("GLUergic", "GLUergic neurons") %>% 
+  factor(levels = sort(levels(.)))
+```
+
+```{r, eval = F}
+markers.minor <- con.major$getDifferentialGenes(groups = anno.minor, 
+                                                z.threshold = 1, 
+                                                upregulated.only = T, 
+                                                append.specificity.metrics = T, 
+                                                append.auc = T)
+
+markers.minor %>% 
+  lapply(filter, PAdj <= 0.05) %>% 
+  bind_rows(.id = "Celltype") %>% 
+  write.table("Table SX - Celltype markers, minor annotation.tsv", sep = "\t", dec = ".", row.names = F)
+```
+
+# Extended Data Table 6 
+
+Not rerun
+
+```{r, eval = F}
+cao <- Cacoa$new(data.object = con, 
+                 cell.groups = anno.minor, 
+                 ref.level = "CTRL", 
+                 target.level = "DISEASE", 
+                 sample.groups = con$samples %>% 
+                   names() %>% 
+                   strsplit("_") %>% 
+                   sget(1) %>%
+                   {ifelse(. == "CTRL", "CTRL", "DISEASE")} %>% 
+                   `names<-`(con$samples %>% 
+                               names()),
+                 sample.groups.palette = c(c("yellow", RColorBrewer::brewer.pal(n = 6, "Accent")[5:6]) %>% setNames(c("CTRL","PD","MSA"))))
+
+cao$sample.groups <- con$samples %>% 
+  names() %>% 
+  strsplit("_") %>% 
+  sget(1) %>% 
+  `names<-`(con$samples %>% 
+              names())
+
+res <- cao$plotCellGroupSizes(show.significance = TRUE, 
+                              filter.empty.cell.types = FALSE)$data %>% 
+  group_by(group, variable) %>% 
+  summarize(Min_proportion = min(value),
+            Mean_proportion = mean(value),
+            Max_proportion = max(value)) %>% 
+  dplyr::rename(Condition = group,
+                Celltype = variable)
+
+res %>% 
+  write.table("Table SX - Proportions, minor annotation.tsv", sep = "\t", dec = ".", row.names = F)
+```
+
+# Extended Data Table 7
+
+Not rerun
+
+First, correct OPCs/COPs for age covariate according to scITD calculations
+
+```{r, eval = F}
+cao_msa <- qread("cao_opc_msa.qs", nthreads = 10)
+cao_pd <- qread("cao_opc_pd.qs", nthreads = 10)
+cao_dis <- qread("cao_opc_dis.qs", nthreads = 10)
+
+metadata.all <- read.delim("metadata.tsv")
+
+meta.df.msa <- metadata.all %>% 
+  filter(sample %in% names(cao_msa$data.object$samples)) %>% 
+  tibble::column_to_rownames("sample") %>% 
+  select(age)
+
+meta.df.pd <- metadata.all %>% 
+  filter(sample %in% names(cao_pd$data.object$samples)) %>% 
+  tibble::column_to_rownames("sample") %>% 
+  select(age)
+
+meta.df.dis <- metadata.all %>% 
+  filter(sample %in% names(cao_dis$data.object$samples)) %>% 
+  tibble::column_to_rownames("sample") %>% 
+  select(age)
+
+all.genes_msa <- cao_msa$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit_msa <- all.genes_msa %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+all.genes_pd <- cao_pd$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit_pd <- all.genes_pd %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+all.genes_dis <- cao_dis$data.object$samples %>% 
+  lget("misc") %>% 
+  lget("rawCounts") %>% 
+  lapply(colnames) %>% 
+  Reduce(union, .)
+
+genes.to.omit_dis <- all.genes_dis %>% 
+  .[grepl("MT-|RPL|RPS", .)]
+
+cao_msa$estimateDEPerCellType(covariates = meta.df.msa, name = "de_age", genes.to.omit = genes.to.omit_msa)
+cao_pd$estimateDEPerCellType(covariates = meta.df.pd, name = "de_age", genes.to.omit = genes.to.omit_pd)
+cao_dis$estimateDEPerCellType(covariates = meta.df.dis, name = "de_age", genes.to.omit = genes.to.omit_dis)
+
+cao_msa$estimateOntology("GSEA", name = "gsea_age", de.name = "de_age", org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao_pd$estimateOntology("GSEA", name = "gsea_age", de.name = "de_age", org.db = org.Hs.eg.db::org.Hs.eg.db)
+cao_dis$estimateOntology("GSEA", name = "gsea_age", de.name = "de_age", org.db = org.Hs.eg.db::org.Hs.eg.db)
+
+qsave(cao_msa, "cao_opc_msa.qs", nthreads = 10)
+qsave(cao_pd, "cao_opc_pd.qs", nthreads = 10)
+qsave(cao_dis, "cao_opc_dis.qs", nthreads = 10)
+```
+
+```{r, eval = F}
+go.list <- dir("cacoa/", full.names = T)[-c(4:7, 15:18, 22, 26)] %>% 
+  lapply(qread, nthreads = 10) %>% 
+  lapply(purrr::pluck, "test.results") %>% 
+  lapply(\(x) if ("gsea_age" %in% names(x)) x$gsea_age else x$gsea) %>% # To include age-corrected calculations for OPCs
+  setNames(dir("cacoa/")[-c(4:7, 15:18, 22, 26)])
+
+go.list %>% 
+  lget("res") %>% 
+  lapply(lapply, lapply, slot, "result") %>% 
+  lapply(lapply, data.table::rbindlist, idcol = "Category") %>% 
+  lapply(data.table::rbindlist, idcol = "Celltype") %>% 
+  data.table::rbindlist(idcol = "Comparison") %>% 
+  mutate(Comparison = sapply(Comparison, \(comp) {
+    if (grepl("dis", comp)) "PD vs MSA" else if (grepl("msa", comp)) "CTRL vs MSA" else "CTRL vs PD"
+  })) %>% 
+  filter(p.adjust <= 0.05) %>% 
+  write.table("GSEA.csv", sep = ",", dec = ".", row.names = F)
+```
+
+# Extended Data Table 8
+
+Not rerun
+
+```{r, eval = F}
+de.list <- dir("cacoa/", full.names = T)[-c(4:7, 15:18, 22, 26)] %>% 
+  lapply(qread, nthreads = 10) %>% 
+  lapply(purrr::pluck, "test.results") %>% 
+  lapply(\(x) if ("de_age" %in% names(x)) x$de_age else x$de) %>% # To include results from age-corrected calculations for OPCs
+  setNames(dir("cacoa/")[-c(4:7, 15:18, 22, 26)])
+
+de.list %>% 
+  lapply(lget, "res") %>% 
+  lapply(data.table::rbindlist, idcol = "Celltype") %>% 
+  lapply(select, Celltype, baseMean, log2FoldChange, lfcSE, stat, pvalue, padj, Gene, Z, Za, CellFrac, SampleFrac) %>% 
+  data.table::rbindlist(idcol = "Comparison") %>% 
+  mutate(Comparison = sapply(Comparison, \(comp) {
+    if (grepl("dis", comp)) "PD vs MSA" else if (grepl("msa", comp)) "CTRL vs MSA" else "CTRL vs PD"
+  })) %>% 
+  filter(padj <= 0.05) %>% 
+  write.table("DEGs.csv", sep = ",", dec = ".", row.names = F)
+```
+
+# Extended Data Table 9
+
+Not rerun. We need the res.filter object from calculation of smoothed heatmap for microglia activation trajectory.
+
+```{r, eval = F}
+go <- clusterProfiler::enrichGO(names(res.filter), 
+                                OrgDb = "org.Hs.eg.db", 
+                                keyType = "SYMBOL", 
+                                universe = colnames(con$getJointCountMatrix()))
+
+go@result %>% 
+  filter(pvalue <= 0.05) %>% 
+  write.table("Microglia_pseudotime_activation-lineage_GO.tsv", sep = "\t", row.names = F)
+```
+
+# Extended Data Table 10
+
+Not rerun. We need the Smooth object for the microglia to PVM trajectory.
+
+```{r, eval = F}
+go.list <- list(repressed = rownames(Smooth)[1:which(rownames(Smooth) == "EPB41L2")],
+                induced = rownames(Smooth)[(which(rownames(Smooth) == "EPB41L2")+1):nrow(Smooth)]) %>% 
+  lapply(clusterProfiler::enrichGO,
+         OrgDb = "org.Hs.eg.db", 
+         keyType = "SYMBOL", 
+         universe = colnames(con$getJointCountMatrix()))
+
+go.list %>% 
+  lapply(\(x) x@result) %>% 
+  lapply(filter, pvalue <= 0.05) %>% 
+  data.table::rbindlist(idcol = "geneset") %>% 
+  write.table("Microglia_pseudotime_PVM-lineage_GO.tsv", sep = "\t", row.names = F)
+```
+
+# Extended Data Table 13
+
+Not rerun. We use the publicly available data from [Rydbirk *et al*.](https://pmc.ncbi.nlm.nih.gov/articles/PMC9164190/).
+
+```{r, eval = F}
+# Create universes
+dat.all <- read.delim("CSF-Sv_Soluble-frac__Report.tsv")
+
+universe.gene <- dat.all %>% 
+  pull(PG.Genes) %>% 
+  unique()
+
+universe.prot <- dat.all %>% 
+  pull(PG.UniProtIds)
+
+# DEPs
+dat <- read.delim("Soluble_fraction.txt")
+
+# KEGG, MSA
+
+kegg.res <- dat %>% 
+  filter(Disease.group == "MSA") %>% 
+  pull(UniProt.ID) %>% 
+  clusterProfiler::enrichKEGG(keyType = "uniprot", pvalueCutoff = 0.2, universe = universe.prot, organism = "hsa")
+
+# KEGG, PD
+
+kegg.res.pd <- dat %>% 
+  filter(Disease.group == "PD") %>% 
+  pull(UniProt.ID) %>% 
+  clusterProfiler::enrichKEGG(keyType = "uniprot", pvalueCutoff = 0.2, universe = universe.prot, organism = "hsa")
+
+# Write table
+
+list(MSA = kegg.res, PD = kegg.res.pd) %>% 
+  lapply(getElement, "result") %>% 
+  lapply(dplyr::select, Description, GeneRatio, BgRatio, pvalue, p.adjust, ID, geneID) %>% 
+  bind_rows(.id = "Disease") %>% 
+  write.table("TableS13_KEGG.tsv", sep = "\t", row.names = F)
+```
 
 # Session info
 

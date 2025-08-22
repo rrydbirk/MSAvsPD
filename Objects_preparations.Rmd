@@ -219,9 +219,9 @@ con <- Conos$new(cms.preprocessed,
                  n.cores = 32, 
                  verbose = TRUE)
 
-con$buildGraph(ncomps = 20)
+con$buildGraph()
 con$findCommunities()
-con$embedGraph(method = "UMAP")
+con$embedGraph(method = "largeVis", M = 30, gamma = 10)
 ```
 
 ## Cacoa
@@ -249,9 +249,10 @@ sample.groups <- con_msa$samples %>%
   names() %>% 
   setNames(ifelse(grepl("CTRL", .), "CTRL", "MSA"), .)
 
+con_msa$n.cores <- 1
 con_msa$buildGraph()
 con_msa$findCommunities()
-con_msa$embedGraph(method = "largeVis")
+con_msa$embedGraph(method = "largeVis", M = 30, gamma = 10)
 
 cao <- Cacoa$new(con_msa, sample.groups, anno, ref.level = "CTRL", target.level = "MSA", n.cores = 50)
 
@@ -270,9 +271,10 @@ sample.groups <- con_pd$samples %>%
   names() %>% 
   setNames(ifelse(grepl("CTRL", .), "CTRL", "PD"), .)
 
+con_pd$n.cores <- 1
 con_pd$buildGraph()
 con_pd$findCommunities()
-con_pd$embedGraph(method = "largeVis")
+con_pd$embedGraph(method = "largeVis", M = 30, gamma = 10)
 
 cao <- Cacoa$new(con_pd, sample.groups, anno, ref.level = "CTRL", target.level = "PD", n.cores = 50)
 
@@ -291,9 +293,10 @@ sample.groups <- con_dis$samples %>%
   names() %>% 
   setNames(ifelse(grepl("MSA", .), "MSA", "PD"), .)
 
+con_dis$n.cores <- 1
 con_dis$buildGraph()
 con_dis$findCommunities()
-con_dis$embedGraph(method = "largeVis")
+con_dis$embedGraph(method = "largeVis", M = 30, gamma = 10)
 
 cao <- Cacoa$new(con_dis, sample.groups, anno, ref.level = "PD", target.level = "MSA", n.cores = 50)
 
