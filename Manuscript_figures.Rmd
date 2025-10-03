@@ -1299,7 +1299,7 @@ cao$data.object$embedding %>%
   dotSize(3)
 ```
 
-## Figures 5d,e & EDF13
+## Figures 5d,e & EDF14
 
 Prepare data
 
@@ -1437,7 +1437,7 @@ rm(cao)
 gc()
 ```
 
-### Extended Data Figure 13
+### Extended Data Figure 14
 
 We provide this figure here since all data are already loaded.
 
@@ -2049,8 +2049,6 @@ c("RBFOX3","MOG","VCAN","AQP4","CSF1R","PDGFRB","PTPRC","MRC1","GAD1","SLC17A7",
 
 # Extended Data Figure 3
 
-## Load and prepare data
-
 ```{r}
 con$embedding <- con$embeddings$UMAP
 
@@ -2066,27 +2064,20 @@ cao <- Cacoa$new(data.object = con,
                  target.level = "DISEASE", 
                  n.cores = 32)
 
-meta <- read.delim("metadata.tsv", sep = "\t") %>% 
-  filter(sample %in% names(con$samples)) %>% 
-  tibble::column_to_rownames("sample")
+meta <- read.delim("metadata.tsv", sep = "\t") %>%
+  filter(sample %in% names(con$samples)) %>%
+  tibble::column_to_rownames("sample") %>% 
+  dplyr::select(-condition)
 
-cao$estimateExpressionShiftMagnitudes()
-cao$estimateMetadataSeparation(sample.meta = meta, 
-                               space = "expression.shifts")
+meta %<>%
+  mutate(sample = rownames(.))
 
-meta %<>% 
-  tibble::rownames_to_column("sample")
-```
-
-## 3a
-
-```{r, fig.width=18, fig.height=16}
 spc <- con$getDatasetPerCell()
 
 mpc <- spc %>% 
   data.frame(sample = ., cid = names(.))
 
-for (cc in colnames(meta)[-1]) {
+for (cc in colnames(meta)) {
   mpc[[cc]] <- meta[[cc]][match(mpc$sample, meta$sample)]
 }
 
@@ -2162,67 +2153,162 @@ p <- con$plotGraph(groups = setNames(mpc$flowcell, mpc$cid), plot.na = F, embedd
 p
 ```
 
-## 3b
-
-```{r, fig.width = 6, fig.height=4}
-cao$plotSampleDistances(space = "expression.shifts", show.sample.size = T, method = "UMAP")$data %>% 
-  mutate(condition = unname(sample.groups)) %>% 
-  ggplot(aes(x, y, shape = condition, col = condition)) +
-  geom_point(aes(size = n.cells)) + scale_size_continuous(trans = "log10", 
-                                                          range = c(5 * 0.5, 5 * 1.5), name = "Num. cells") +
-  theme_bw() +
-  scale_color_manual(values = pal.major) +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank()) +
-  labs(x = "", y = "", title = "Condition", shape = "Condition", col = "Condition") +
-  dotSize(3)
-```
-
-```{r, fig.width = 6, fig.height=4}
-cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$age %>% setNames(rownames(meta)))$data %>% 
-  mutate(condition = unname(sample.groups)) %>% 
-  ggplot(aes(x, y, shape = condition, col = color)) +
-  geom_point(size = 3) +
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank()) +
-  labs(x = "", y = "", title = "Age", color = "Age (y)", shape = "Condition")
-```
-
-```{r, fig.width = 6, fig.height=4}
-cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$brain_bank %>% setNames(rownames(meta)))$data %>% 
-  mutate(condition = unname(sample.groups)) %>% 
-  ggplot(aes(x, y, shape = condition, col = color)) +
-  geom_point(size = 3) +
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank()) +
-  labs(x = "", y = "", title = "Brain bank", shape = "Condition", color = "Brain bank")
-```
-
-```{r, fig.width = 6, fig.height=4}
-cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$extract %>% setNames(rownames(meta)))$data %>% 
-  mutate(condition = unname(sample.groups)) %>% 
-  ggplot(aes(x, y, shape = condition, col = color)) +
-  geom_point(size = 3) +
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank()) +
-  labs(x = "", y = "", title = "Extract", shape = "Condition", color = "Extract")
-```
-
-```{r, fig.width = 6, fig.height=4}
-cao$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$flowcell %>% setNames(rownames(meta)))$data %>% 
-  mutate(condition = unname(sample.groups)) %>% 
-  ggplot(aes(x, y, shape = condition, col = color)) +
-  geom_point(size = 3) +
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank()) +
-  labs(x = "", y = "", title = "Flowcell", shape = "Condition", color = "Flowcell")
-```
-
 # Extended Data Figure 4
+
+## 4a
+
+```{r}
+con_pd <- con$clone()
+con_pd$embedding <- con$embeddings$UMAP
+
+con_pd$samples <- con$samples %>% .[!grepl("MSA", names(.))]
+
+sample.groups <- con_pd$samples %>% 
+  names() %>% 
+  setNames(grepl.replace(., c("CTRL","PD")), .)
+
+cao_pd <- Cacoa$new(data.object = con_pd, 
+                 sample.groups = ifelse(grepl("CTRL", sample.groups), "CTRL", "PD") %>% 
+                   setNames(names(sample.groups)), 
+                 cell.groups = anno.major, 
+                 ref.level = "CTRL", 
+                 target.level = "PD", 
+                 n.cores = 32)
+
+cao_pd$estimateExpressionShiftMagnitudes()
+cao_pd$estimateMetadataSeparation(sample.meta = meta %>% filter(!grepl("MSA", sample)) %>% dplyr::select(-disease_duration, -subtype, -sample), 
+                               space = "expression.shifts")
+```
+
+```{r, fig.width=20, fig.height=8}
+cowplot::plot_grid(plotlist = list(
+  cao_pd$plotSampleDistances(space = "expression.shifts", show.sample.size = T, method = "UMAP", title = "Condition"),
+  cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$age %>% setNames(rownames(meta)), title = "Age"),
+  cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$brain_bank %>% setNames(rownames(meta)), show.sample.size = T, title = "Brain bank"),
+  cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$extract %>% setNames(rownames(meta)), show.sample.size = T, title = "Extract batch"),
+  cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$flowcell %>% setNames(rownames(meta)), show.sample.size = T, title = "Flowcell"),
+  cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$pmi %>% setNames(rownames(meta)), title = "PMI"),
+  cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$sex %>% setNames(rownames(meta)), show.sample.size = T, title = "Sex"),
+  cao_pd$test.results$metadata.separation$pvalues %>%
+    data.frame(p = .) %>%
+    mutate(pp = -log10(p)) %>%
+    tibble::rownames_to_column("covariate") %>%
+    ggplot(aes(covariate, pp)) +
+    geom_bar(stat = "identity", fill = "lightblue4") +
+    ylim(0, 2) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+    labs(x = "", y = "-log10(adj. p)", title = "Association significance") +
+    geom_hline(yintercept = -log10(0.05), colour = "red3")
+), ncol = 4) -> p
+
+p
+```
+
+## 4b
+
+```{r}
+con_msa <- con$clone()
+con_msa$embedding <- con$embeddings$UMAP
+
+con_msa$samples <- con$samples %>% .[!grepl("PD", names(.))]
+
+sample.groups <- con_msa$samples %>% 
+  names() %>% 
+  setNames(grepl.replace(., c("CTRL","MSA")), .)
+
+cao_msa <- Cacoa$new(data.object = con_msa, 
+                 sample.groups = ifelse(grepl("CTRL", sample.groups), "CTRL", "MSA") %>% 
+                   setNames(names(sample.groups)), 
+                 cell.groups = anno.major, 
+                 ref.level = "CTRL", 
+                 target.level = "MSA", 
+                 n.cores = 32)
+
+cao_msa$estimateExpressionShiftMagnitudes()
+cao_msa$estimateMetadataSeparation(sample.meta = meta %>% filter(!grepl("PD", sample)) %>% dplyr::select(-brain_bank, -sample), 
+                               space = "expression.shifts")
+```
+
+```{r, fig.width=25, fig.height=8}
+cowplot::plot_grid(plotlist = list(
+  cao_msa$plotSampleDistances(space = "expression.shifts", show.sample.size = T, method = "UMAP", title = "Condition"),
+  cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$age %>% setNames(rownames(meta)), title = "Age"),
+  cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$disease_duration %>% setNames(rownames(meta)), show.sample.size = T, title = "Disease duration"),
+  cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$extract %>% setNames(rownames(meta)), show.sample.size = T, title = "Extract batch"),
+  cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$flowcell %>% setNames(rownames(meta)), show.sample.size = T, title = "Flowcell"),
+  cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$pmi %>% setNames(rownames(meta)), title = "PMI"),
+    cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$sex %>% setNames(rownames(meta)), show.sample.size = T, title = "Sex"),
+  cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$subtype %>% setNames(rownames(meta)), show.sample.size = T, title = "Subtype"),
+  cao_msa$test.results$metadata.separation$pvalues %>%
+    data.frame(p = .) %>%
+    mutate(pp = -log10(p)) %>%
+    tibble::rownames_to_column("covariate") %>%
+    ggplot(aes(covariate, pp)) +
+    geom_bar(stat = "identity", fill = "lightblue4") +
+    ylim(0, 2) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+    labs(x = "", y = "-log10(adj. p)", title = "Association significance") +
+    geom_hline(yintercept = -log10(0.05), colour = "red3")
+), ncol = 5) -> p
+
+p
+```
+
+## 4c
+
+```{r}
+con_dis <- con$clone()
+con_dis$embedding <- con$embeddings$UMAP
+
+con_dis$samples <- con$samples %>% .[!grepl("CTRL", names(.))]
+
+sample.groups <- con_dis$samples %>% 
+  names() %>% 
+  setNames(grepl.replace(., c("PD","MSA")), .)
+
+cao_dis <- Cacoa$new(data.object = con_dis, 
+                 sample.groups = ifelse(grepl("PD", sample.groups), "PD", "MSA") %>% 
+                   setNames(names(sample.groups)), 
+                 cell.groups = anno.major, 
+                 ref.level = "PD", 
+                 target.level = "MSA", 
+                 n.cores = 32)
+
+cao_dis$estimateExpressionShiftMagnitudes()
+cao_dis$estimateMetadataSeparation(sample.meta = meta %>% filter(!grepl("CTRL", sample)) %>% dplyr::select(-sample), 
+                               space = "expression.shifts")
+```
+
+```{r, fig.width=25, fig.height=8}
+cowplot::plot_grid(plotlist = list(
+  cao_dis$plotSampleDistances(space = "expression.shifts", show.sample.size = T, method = "UMAP", title = "Condition"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$age %>% setNames(rownames(meta)), title = "Age"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$brain_bank %>% setNames(rownames(meta)), show.sample.size = T, title = "Brain bank"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$disease_duration %>% setNames(rownames(meta)), show.sample.size = T, title = "Disease duration"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$extract %>% setNames(rownames(meta)), show.sample.size = T, title = "Extract batch"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$flowcell %>% setNames(rownames(meta)), show.sample.size = T, title = "Flowcell"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$pmi %>% setNames(rownames(meta)), title = "PMI"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$sex %>% setNames(rownames(meta)), show.sample.size = T, title = "Sex"),
+  cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$subtype %>% setNames(rownames(meta)), show.sample.size = T, title = "Subtype"),
+  cao_dis$test.results$metadata.separation$pvalues %>%
+    data.frame(p = .) %>%
+    mutate(pp = -log10(p)) %>%
+    tibble::rownames_to_column("covariate") %>%
+    ggplot(aes(covariate, pp)) +
+    geom_bar(stat = "identity", fill = "lightblue4") +
+    ylim(0, 2) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+    labs(x = "", y = "-log10(adj. p)", title = "Association significance") +
+    geom_hline(yintercept = -log10(0.05), colour = "red3")
+), ncol = 5) -> p
+
+p
+```
+
+# Extended Data Figure 5
 
 To investigate effects from co-variates, we ran scITD on all cell types for each comparison. We don't determine factors here as it takes a significant amount of time, but we keep the code in the first instance.
 
@@ -2322,7 +2408,7 @@ itd_container %<>% get_meta_associations(vars_test=c('sex','pmi', "age", "flowce
 # plot donor scores
 itd_container %<>% plot_donor_matrix(meta_vars=c('sex','pmi', "age", "flowcell", "extract"), # Omitting brain bank
                                      show_donor_ids = TRUE,
-                                     add_meta_associations='pval')
+                                     add_meta_associations="pval")
 
 # show the donor scores heatmap
 p <- itd_container$plots$donor_matrix
@@ -2421,6 +2507,7 @@ itd_container %<>% form_tensor(donor_min_cells=1,
 
 print(length(itd_container[["all_vargenes"]]))
 ```
+
 
 ```{r}
 itd_container %<>% run_tucker_ica(ranks=c(5,10),
@@ -2698,6 +2785,7 @@ itd_container %<>% form_tensor(donor_min_cells=3,
 
 print(length(itd_container[["all_vargenes"]]))
 ```
+
 
 ```{r}
 itd_container %<>% run_tucker_ica(ranks=c(3,7),
@@ -3227,7 +3315,7 @@ rm(con.tmp, cm.raw.all, itd_container)
 gc()
 ```
 
-# Extended Data Figure 6
+# Extended Data Figure 7
 
 We're calculating cosine similarities to annotated data from [Garma et al.](https://www.nature.com/articles/s41467-024-50414-w). The data are available [here](https://figshare.com/articles/dataset/Raw_and_processed_snRNA-seq_counts_matrices_from_human_striatal_interneurons/22340140).
 
@@ -3306,7 +3394,7 @@ con$clusters$spc$groups <- spc
 qsave(con, "con_garma.qs", nthreads = 10)
 ```
 
-## 6a
+## 7a
 
 ```{r}
 # Our data
@@ -3397,7 +3485,7 @@ lsa::cosine(dat.plot %>%
   labs(title = "Top 50 OD genes, Garma PCA rotation into Rydbirk PCA space")
 ```
 
-## 6b
+## 7b
 
 ```{r, fig.width=10, fig.height=8}
 cm.garma.raw <- con.garma$getJointCountMatrix(raw = T)
@@ -3428,7 +3516,7 @@ rm(con.garma, cm.garma.ext, cm.garma.raw, cm.garma)
 gc()
 ```
 
-# Extended Data Figure 7
+# Extended Data Figure 8
 
 ## Prepare data
 
@@ -3607,7 +3695,7 @@ rm(cm.kamath, kamath.cm1, kamath.cm2, rydbirk.neurons, cm.rydbirk, cm.rydbirk.ra
 gc()
 ```
 
-# Extended Data Figure 8
+# Extended Data Figure 9
 
 Here, we use public data from [Smajic *et al*.](https://academic.oup.com/brain/article/145/3/964/6469020). We isolated neurons and used the available annotation (IPDCO_hg_midbrain_cell.tsv).
 
@@ -3645,6 +3733,10 @@ gc()
 ```
 
 # Extended Data Figure 10
+
+These plots were created with results from LIANA in Python.
+
+# Extended Data Figure 11
 
 ```{r}
 cm.merged <- con$getJointCountMatrix(raw = T) %>% 
@@ -3691,7 +3783,45 @@ c("TSPO", "COQ2", "MAPT", "FBXO47", "ELOVL7", "EDN1", "GAB1", "TENM2", "RABGEF1"
   cowplot::plot_grid(plotlist = ., ncol = 3)
 ```
 
-# Extended Data Figures 11 & 12
+```{r, fig.width=8, fig.height=4}
+res.old <- c("TSPO", "COQ2", "MAPT", "FBXO47", "ELOVL7", "EDN1", "GAB1", "TENM2", "RABGEF1", "PLA2G4C", "INPP4B", "ZIC1", "ZIC2", "ZIC3", "ZIC4", "SNCA", "TPPP") %>% 
+  lapply(\(gene) {
+    idx <- cm.pseudo %>% 
+    colnames() %>% 
+    data.frame(id = .) %>% 
+    mutate(condition = strsplit(id, "_|!!") %>% sget(1),
+           ct = strsplit(id, "!!") %>% sget(2)) %>% 
+    mutate(ord = order(condition, ct))
+  
+  x <- cm.pseudo %>% 
+    .[match(gene, rownames(.)), match(colnames(na.omit(.)), colnames(.))] %>%
+    .[idx$ord]
+  
+  plot.dat <- x %>% 
+    {data.frame(sample = names(.), 
+                value = unname(.))} %>%
+    mutate(anno = strsplit(sample, "!!") %>% 
+             sget(2),
+           condition = strsplit(sample, "!!|_") %>% 
+             sget(1)) %>%
+    mutate(anno = factor(anno))
+  
+  stat.test <- plot.dat %>% 
+    group_by(anno) %>% 
+    rstatix::wilcox_test(value ~ condition)
+  
+  stat.omnibus <- plot.dat %>% 
+    group_by(anno) %>% 
+    rstatix::kruskal_test(value ~ condition)
+  
+  out <- data.frame(Gene = gene, celltype = stat.test$anno, omnibus.old = stat.omnibus$p, contrast = sapply(seq(nrow(stat.test)), \(x) paste(stat.test$group1[x], stat.test$group2[x], sep = " - ")), padj.old = stat.test$p.adj)
+  
+  return(out)
+  }) %>% 
+  bind_rows()
+```
+
+# Extended Data Figures 12 & 13
 
 ## Load and prepare data
 
@@ -3716,7 +3846,7 @@ sds <- as.SlingshotDataSet(sds_obj)
 pseudotime <- sds_obj@assays@data@listData$pseudotime[, 1]
 ```
 
-## 11a
+## 12a
 
 ```{r, fig.width=6, fig.height=4}
 plot.df <- cao$data.object$embedding %>% 
@@ -3742,7 +3872,7 @@ cao$data.object$embedding %>%
   labs(col = "Pseudotime", x = "UMAP1", y = "UMAP2")# +
 ```
 
-## 11b
+## 12b
 
 Here, we show the code for running the generalized additive mixed model. It takes a significant amount of time to run, we provide data in `pseudotime_micro_l1.qs`.
 
@@ -3836,7 +3966,7 @@ Heatmap(Smooth,
         row_names_gp = grid::gpar(fontsize = 5))
 ```
 
-## 12
+## 13
 
 ```{r, fig.height=40, fig.width=20}
 cpc <- pseudotime %>% 
@@ -3857,7 +3987,7 @@ res.filter %>%
   facet_wrap(~gene, ncol = 5, scales = "free")
 ```
 
-# Extended Data Figure 14
+# Extended Data Figure 15
 
 Here, we use public data from [Feleke *et al*.](https://link.springer.com/article/10.1007/s00401-021-02343-x). We isolated microglia based on CSF1R expression and performed a quick annotation using AIF1 expression to identify activated microglia.
 
@@ -3904,9 +4034,9 @@ rm(con.clone, con.micro, cao)
 gc()
 ```
 
-# Extended Data Figure 15
+# Extended Data Figure 16
 
-## 15a
+## 16a
 
 We provide the results output from scHLAcount in `scHLAcount.zip`.
 
@@ -4211,7 +4341,7 @@ cell.anno.df %>%
   data.frame()
 ```
 
-## 15b
+## 16b
 
 We provide a curated list with MHC and cytokine genes. Please note, the order of clusters may change.
 
@@ -4326,9 +4456,9 @@ ComplexHeatmap::Heatmap(cm.pseudo,
                         row_km = 4)
 ```
 
-# Extended Data Figure 16
+# Extended Data Figure 17
 
-## 16c
+## 17c
 
 ```{r, fig.width=14, fig.height=6}
 c("FOSL2", "TCF4", "STAT1", "NR3C1", "ETV7", "THRB", "BPTF", "RELB", "CEBPD", "HIF1A", "ELF1", "CREM", "ELF2", "ZNF44", "CHD1", "POU2F1", "GTF2IRD1", "NFIA", "NFE2L2", "FOXP1", "FOXO3") %>% 
@@ -4338,9 +4468,9 @@ c("FOSL2", "TCF4", "STAT1", "NR3C1", "ETV7", "THRB", "BPTF", "RELB", "CEBPD", "H
   scale_fill_manual(values = brewer.pal(6, "Greys")[-1])
 ```
 
-# Extended Data Figure 17
+# Extended Data Figure 18
 
-## 17a
+## 18a
 
 We provide the results from scDRS based on Nalls *et al.* GWAS summary stats. For calculation of these, see `scDRS_PD.ipynb`.
 
@@ -4417,7 +4547,7 @@ data.frame(cell = dat.scores$X,
   geom_hline(yintercept = 0)
 ```
 
-## 17b
+## 18b
 
 ```{r, fig.height=4, fig.width=3.5, message=TRUE, warning=TRUE}
 dat.ct <- read.delim("gwas/nalls/downstream_celltype_microglia.tsv", header = F, sep = "\t") %$%  
@@ -4444,7 +4574,7 @@ dat.sign <-
   select(group, sign) %>% 
   dplyr::rename(type = group)
 
-data.frame(cell = dat.scores$X %>% gsub("one_", "!!", .),
+p <- data.frame(cell = dat.scores$X %>% gsub("one_", "!!", .),
            score = dat.scores$norm_score,
            type = anno.major[match(dat.scores$X,
                                    names(anno.major))]) %>%
@@ -4467,9 +4597,11 @@ data.frame(cell = dat.scores$X %>% gsub("one_", "!!", .),
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
   ylim(c(0, 2)) +
   scale_fill_manual(values = pal.major)
+
+p
 ```
 
-## 17c
+## 18c
 
 We provide the results from scDRS based on Chia *et al.* GWAS summary stats. For calculation of these, see `scDRS_MSA.ipynb`.
 
@@ -4544,7 +4676,7 @@ data.frame(cell = dat.scores$X,
   geom_hline(yintercept = 0)
 ```
 
-# Extended Data Figure 18
+# Extended Data Figure 19
 
 All subfigures were made in GraphPad Prism. Data are available in `Phagocytosis_assay_triplicates_raw_data_HH.tsv` (Copenhagen experiment) or `HOUSTON.tsv` (Houston experiment).
 
