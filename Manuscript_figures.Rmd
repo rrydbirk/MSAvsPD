@@ -2153,7 +2153,17 @@ p <- con$plotGraph(groups = setNames(mpc$flowcell, mpc$cid), plot.na = F, embedd
 p
 ```
 
-# Extended Data Figure 4
+# Extended Data Figure 4 & EDT3
+
+## Load metadata
+
+```{r}
+meta <- read.delim("metadata.tsv", sep = "\t") %>%
+  filter(sample %in% names(con$samples)) %>%
+  tibble::column_to_rownames("sample") %>% 
+  mutate(sample = rownames(.))
+  # dplyr::select(-condition)
+```
 
 ## 4a
 
@@ -2189,13 +2199,13 @@ cowplot::plot_grid(plotlist = list(
   cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$flowcell %>% setNames(rownames(meta)), show.sample.size = T, title = "Flowcell"),
   cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$pmi %>% setNames(rownames(meta)), title = "PMI"),
   cao_pd$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$sex %>% setNames(rownames(meta)), show.sample.size = T, title = "Sex"),
-  cao_pd$test.results$metadata.separation$pvalues %>%
+  cao_pd$test.results$metadata.separation$padjust %>%
     data.frame(p = .) %>%
     mutate(pp = -log10(p)) %>%
     tibble::rownames_to_column("covariate") %>%
     ggplot(aes(covariate, pp)) +
     geom_bar(stat = "identity", fill = "lightblue4") +
-    ylim(0, 2) +
+    ylim(0, pmax(2, max(-log10(cao_pd$test.results$metadata.separation$padjust)))) +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
     labs(x = "", y = "-log10(adj. p)", title = "Association significance") +
@@ -2240,13 +2250,13 @@ cowplot::plot_grid(plotlist = list(
   cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$pmi %>% setNames(rownames(meta)), title = "PMI"),
     cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$sex %>% setNames(rownames(meta)), show.sample.size = T, title = "Sex"),
   cao_msa$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$subtype %>% setNames(rownames(meta)), show.sample.size = T, title = "Subtype"),
-  cao_msa$test.results$metadata.separation$pvalues %>%
+  cao_msa$test.results$metadata.separation$padjust %>%
     data.frame(p = .) %>%
     mutate(pp = -log10(p)) %>%
     tibble::rownames_to_column("covariate") %>%
     ggplot(aes(covariate, pp)) +
     geom_bar(stat = "identity", fill = "lightblue4") +
-    ylim(0, 2) +
+    ylim(0, pmax(2, max(-log10(cao_pd$test.results$metadata.separation$padjust)))) +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
     labs(x = "", y = "-log10(adj. p)", title = "Association significance") +
@@ -2292,13 +2302,13 @@ cowplot::plot_grid(plotlist = list(
   cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", show.sample.size = T, sample.colors = meta$pmi %>% setNames(rownames(meta)), title = "PMI"),
   cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$sex %>% setNames(rownames(meta)), show.sample.size = T, title = "Sex"),
   cao_dis$plotSampleDistances(space = "expression.shifts", method = "UMAP", sample.colors = meta$subtype %>% setNames(rownames(meta)), show.sample.size = T, title = "Subtype"),
-  cao_dis$test.results$metadata.separation$pvalues %>%
+  cao_dis$test.results$metadata.separation$padjust %>%
     data.frame(p = .) %>%
     mutate(pp = -log10(p)) %>%
     tibble::rownames_to_column("covariate") %>%
     ggplot(aes(covariate, pp)) +
     geom_bar(stat = "identity", fill = "lightblue4") +
-    ylim(0, 2) +
+    ylim(0, pmax(2, max(-log10(cao_pd$test.results$metadata.separation$padjust)))) +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
     labs(x = "", y = "-log10(adj. p)", title = "Association significance") +
@@ -2306,6 +2316,23 @@ cowplot::plot_grid(plotlist = list(
 ), ncol = 5) -> p
 
 p
+```
+
+## Extended Data Table 3
+
+Not rerun
+
+```{r, eval = F}
+list(cao_msa, cao_pd, cao_dis) %>% 
+  lapply(getElement, "test.results") %>% 
+  lget("metadata.separation") %>%
+  lapply(\(x) x[-1]) %>%
+  Map(\(dat, nn) bind_cols(dat) %>% data.frame() %>%  `rownames<-`(nn), dat = ., nn = lapply(., lapply, names) %>% sget(1)) %>% 
+  setNames(c("MSA", "PD", "dis")) %>% 
+  lapply(tibble::rownames_to_column, var = "covariate") %>% 
+  bind_rows(.id = "comparison") %>% 
+  mutate(comparison = scHelper::grepl.replace(comparison, c("MSA", "PD", "dis"), c("CTRL vs MSA", "CTRL vs PD", "PD vs MSA"))) %>% 
+  write.table("/work/msa/05_tables/Table SX - Cacoa covariate analysis.tsv", sep = "\t", dec = ".", row.names = F)
 ```
 
 # Extended Data Figure 5
@@ -3313,6 +3340,113 @@ p
 ```{r, echo = F}
 rm(con.tmp, cm.raw.all, itd_container)
 gc()
+```
+
+# Extended Data Figure 6
+
+For panels a-d, see `scCODA.ipynb`.
+
+Load data
+
+```{r, fig.width=15, fig.height=8}
+anno.major <- qread("anno_major.qs")
+meta <- read.delim("metadata.tsv", sep = "\t")
+
+anno.micro <- qread("anno_micro_pvm.qs") %>% 
+  renameAnnotation("Steady-state","MIC_steady-state") %>% 
+  renameAnnotation("Intermediate1","MIC_intermediate1") %>% 
+  renameAnnotation("Intermediate2","MIC_intermediate2") %>% 
+  renameAnnotation("Activated","MIC_activated")
+
+anno.glia <- c("anno_astro.qs",
+               "anno_oligo.qs",
+               "anno_opc.qs") %>% 
+  lapply(qread) %>% 
+  Reduce(c, .) %>% 
+  factor() %>% 
+  renameAnnotation("Homeostatic_astrocytes", "AS_homeostatic") %>% 
+  renameAnnotation("Reactive_astrocytes", "AS_reactive") %>% 
+  renameAnnotation("Homeostatic_LINC01608", "OL_LINC01608") %>%
+  renameAnnotation("Homeostatic_SLC5A11", "OL_SLC5A11") %>% 
+  renameAnnotation("Reactive_SCGZ", "OL_SGCZ")
+
+anno.neurons <- qread("anno_neurons.qs")
+```
+
+## 6e
+
+```{r}
+# Minor final
+anno.minor <- anno.major[!anno.major %in% c("PVMs", "Astrocytes", "Oligodendrocytes", "OPCs", "Microglia")] %>% 
+  {factor(c(., anno.glia, anno.micro))} %>% 
+  factor(levels = sort(levels(.)))
+
+df <- data.frame(cid = names(anno.minor), anno = unname(anno.minor)) %>% 
+  mutate(sample = strsplit(cid, "!!") %>% sget(1)) %>% 
+  group_by(sample, anno) %>% 
+  summarize(n = n()) %>% 
+  mutate(prop = n / sum(n) * 100) %>% 
+  ungroup() %>% 
+  filter(anno %in% c("Inh. neurons", "Exc. neurons", "MSN")) %>% 
+  mutate(age = meta$age[match(sample, meta$sample)]) %>% 
+  mutate(age_bin = cut(age, breaks = c(0, 60, 70, 80, 90), labels = c("0-60", "60-70", "70-80", "80-90")),
+         condition = grepl.replace(sample, c("CTRL", "MSA", "PD")))
+
+df %>% 
+  ggplot(aes(age_bin, prop)) + 
+  geom_boxplot() +
+  geom_point(position = position_dodge(width = 0.85)) + 
+  theme_bw() +
+  facet_wrap(~ anno) -> p
+
+p
+```
+
+Statistics
+
+```{r}
+df %>% 
+  group_by(anno) %>%
+  rstatix::kruskal_test(prop ~ age_bin) %>% 
+  mutate(padj = p.adjust(p, method = "BH"))
+```
+
+## 6f
+
+```{r, fig.width=15, fig.height=8}
+# Minor final
+anno.minor <- anno.major[!anno.major %in% c("Inh. neurons", "MSN", "Exc. neurons", "PVMs", "Astrocytes", "Oligodendrocytes", "OPCs", "Microglia")] %>% 
+  {factor(c(., anno.neurons, anno.glia, anno.micro))} %>% 
+  factor(levels = sort(levels(.)))
+
+df <- data.frame(cid = names(anno.minor), anno = unname(anno.minor)) %>% 
+  mutate(sample = strsplit(cid, "!!") %>% sget(1)) %>% 
+  group_by(sample, anno) %>% 
+  summarize(n = n()) %>% 
+  mutate(prop = n / sum(n) * 100) %>% 
+  ungroup() %>% 
+  filter(anno %in% levels(anno.micro)) %>% 
+  mutate(age = meta$age[match(sample, meta$sample)]) %>% 
+  mutate(age_bin = cut(age, breaks = c(0, 60, 70, 80, 90), labels = c("0-60", "60-70", "70-80", "80-90")),
+         condition = grepl.replace(sample, c("CTRL", "MSA", "PD")))
+
+df %>% 
+  ggplot(aes(age_bin, prop)) + 
+  geom_boxplot() +
+  geom_point(position = position_dodge(width = 0.85)) + 
+  theme_bw() +
+  facet_wrap(~ anno) -> p
+
+p
+```
+
+Statistics
+
+```{r}
+df %>% 
+  group_by(anno) %>%
+  rstatix::kruskal_test(prop ~ age_bin) %>% 
+  mutate(padj = p.adjust(p, method = "BH"))
 ```
 
 # Extended Data Figure 7
@@ -4738,7 +4872,7 @@ markers.major %>%
   write.table("Table SX - Celltype markers, major annotation.tsv", sep = "\t", dec = ".", row.names = F)
 ```
 
-# Extended Data Table 3
+# Extended Data Table 4
 
 Not rerun
 
@@ -4770,7 +4904,7 @@ res %>%
   write.table("Table SX - Loadings.tsv", sep = "\t", dec = ".", row.names = F)
 ```
 
-# Extended Data Table 4
+# Extended Data Table 5
 
 Not rerun
 
@@ -4808,7 +4942,7 @@ res %>%
   write.table("Table SX - Proportions, major annotation.tsv", sep = "\t", dec = ".", row.names = F)
 ```
 
-# Extended Data Table 5
+# Extended Data Table 6
 
 Not rerun
 
@@ -4865,7 +4999,7 @@ markers.minor %>%
   write.table("Table SX - Celltype markers, minor annotation.tsv", sep = "\t", dec = ".", row.names = F)
 ```
 
-# Extended Data Table 6 
+# Extended Data Table 7
 
 Not rerun
 
@@ -4903,7 +5037,7 @@ res %>%
   write.table("Table SX - Proportions, minor annotation.tsv", sep = "\t", dec = ".", row.names = F)
 ```
 
-# Extended Data Table 7
+# Extended Data Table 8
 
 Not rerun
 
@@ -4991,7 +5125,7 @@ go.list %>%
   write.table("GSEA.csv", sep = ",", dec = ".", row.names = F)
 ```
 
-# Extended Data Table 8
+# Extended Data Table 9
 
 Not rerun
 
@@ -5014,7 +5148,7 @@ de.list %>%
   write.table("DEGs.csv", sep = ",", dec = ".", row.names = F)
 ```
 
-# Extended Data Table 9
+# Extended Data Table 10
 
 Not rerun. We need the res.filter object from calculation of smoothed heatmap for microglia activation trajectory.
 
@@ -5029,7 +5163,7 @@ go@result %>%
   write.table("Microglia_pseudotime_activation-lineage_GO.tsv", sep = "\t", row.names = F)
 ```
 
-# Extended Data Table 10
+# Extended Data Table 11
 
 Not rerun. We need the Smooth object for the microglia to PVM trajectory.
 
@@ -5048,7 +5182,7 @@ go.list %>%
   write.table("Microglia_pseudotime_PVM-lineage_GO.tsv", sep = "\t", row.names = F)
 ```
 
-# Extended Data Table 13
+# Extended Data Table 14
 
 Not rerun. We use the publicly available data from [Rydbirk *et al*.](https://pmc.ncbi.nlm.nih.gov/articles/PMC9164190/).
 
@@ -5086,7 +5220,7 @@ list(MSA = kegg.res, PD = kegg.res.pd) %>%
   lapply(getElement, "result") %>% 
   lapply(dplyr::select, Description, GeneRatio, BgRatio, pvalue, p.adjust, ID, geneID) %>% 
   bind_rows(.id = "Disease") %>% 
-  write.table("TableS13_KEGG.tsv", sep = "\t", row.names = F)
+  write.table("TableS14_KEGG.tsv", sep = "\t", row.names = F)
 ```
 
 # Session info
